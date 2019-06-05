@@ -10,9 +10,8 @@
 namespace hacks::shared::followbot
 {
 
-void DrawTick();
 int ClassPriority(CachedEntity *ent);
 
 bool isEnabled();
-int getTarget();
+extern int follow_target;
 } // namespace hacks::shared::followbot

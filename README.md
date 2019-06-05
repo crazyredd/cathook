@@ -2,27 +2,28 @@
 ![banner](http://i.imgur.com/w96wdtE.png)
 [![CircleCI](https://circleci.com/gh/nullworks/cathook.svg?style=svg)](https://circleci.com/gh/nullworks/cathook)
 
-
-[cathook announcements channel in telegram](https://t.me/cathook_cheat)
-
 ## Risk of VAC detection
 
-The software Might be VAC detected. Only use it on accounts you won't regret getting VAC banned.
+The software could be detected by VAC in the future. Only use it on accounts you won't regret getting VAC banned.
 
 ## Community
-You can chat with other cathook users in [my official telegram group](https://t.me/nullifiedcat).
+You can chat with other cathook users in [our official telegram group](https://t.me/nullworks) and the [cathook announcements channel](https://t.me/cathook_cheat).
 
-## Important
+## Reporting Issues
 
-Right now cathook isn't in its greatest state, a lot of things may not work/crash the game, please open issues on github using [this page](https://github.com/nullworks/cathook/issues).
+If some things doesn't work as expected, please open issues on GitHub using [this page](https://github.com/nullworks/cathook/issues).
+
+## Contributing
+
+Do you want to submit code to cathook? Please read `CONTRIBUTING.md` for a short introduction.
 
 ## Overview
 
-cathook is a training software designed for Team Fortress 2 for Linux. cathook includes some joke features like
+Cathook is a training software designed for Team Fortress 2 for Linux. Cathook includes some joke features like
 
-* Backpack.TF API integration with playerlist GUI, allowing you to see players' inventory values
 * Ignore Hoovy
 * Encrypted chat
+* IRC Support (Find other Cathook users in-game automatically)
 * Chance to get manually VAC banned by Valve
 
 and a lot of useful features, including
@@ -30,18 +31,19 @@ and a lot of useful features, including
 * Anti Backstab with option to use "No" voice command when spy tries to backstab you
 * Extremely customizable spam (you can make spam lines that'll include name of random dead enemy pyro or sniper)
 * Follow Bots
+* Navparser Bots (Walkbots than can walk on any map without manual configuration)
 * Working crit hack (does not work right now (works right now))
 
-[FULL LIST OF FEATURES HERE](https://github.com/nullworks/cathook/wiki/List-of-features) (list might be outdated)
+[FULL LIST OF FEATURES HERE](https://github.com/nullworks/cathook/wiki/Feature-List-and-explanations) (list might be outdated)
 
 # INSTALLATION
 
 ## Automatic: (Ubuntu 17.10+/Arch based only)
 Run in terminal:
 
-* `wget https://raw.githubusercontent.com/nullworks/One-in-all-cathook-install/master/install-all && bash install-all`
+* `wget -O - https://raw.githubusercontent.com/nullworks/One-in-all-cathook-install/master/install-all | bash`
 
-## Manual:
+## Manual (Outdated):
 You need CMake to build cathook, CMake should take care of dependencies
 
 Install libglez, libxoverlay and simple-ipc

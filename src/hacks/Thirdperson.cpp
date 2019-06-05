@@ -8,11 +8,13 @@
 #include <entitycache.hpp>
 #include <core/sdk.hpp>
 
-static settings::Bool enable{ "visual.thirdperson.enable", "false" };
-static settings::Bool angles{ "visual.thirdperson.real-angles", "false" };
+namespace hacks::tf::thirdperson
+{
+static settings::Boolean enable{ "visual.thirdperson.enable", "false" };
+static settings::Boolean real_angles{ "visual.thirdperson.real-angles", "false" };
 static bool was_enabled{ false };
 
-void hacks::tf::thirdperson::frameStageNotify()
+void frameStageNotify()
 {
     if (CE_BAD(LOCAL_E))
         return;
@@ -30,11 +32,10 @@ void hacks::tf::thirdperson::frameStageNotify()
         CE_INT(LOCAL_E, netvar.nForceTauntCam) = 0;
         was_enabled                            = false;
     }
-    if (angles && g_IInput->CAM_IsThirdPerson())
+    if (real_angles && g_IInput->CAM_IsThirdPerson())
     {
-        CE_FLOAT(LOCAL_E, netvar.deadflag + 4) =
-            g_Settings.brute.last_angles[LOCAL_E->m_IDX].x;
-        CE_FLOAT(LOCAL_E, netvar.deadflag + 8) =
-            g_Settings.brute.last_angles[LOCAL_E->m_IDX].y;
+        CE_FLOAT(LOCAL_E, netvar.deadflag + 4) = g_Settings.brute.last_angles[LOCAL_E->m_IDX].x;
+        CE_FLOAT(LOCAL_E, netvar.deadflag + 8) = g_Settings.brute.last_angles[LOCAL_E->m_IDX].y;
     }
 }
+} // namespace hacks::tf::thirdperson

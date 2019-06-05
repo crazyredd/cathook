@@ -274,11 +274,19 @@ build
 # idk where it comes from
 cathook.cbp
 
+*.geany
 .project
 .cproject
 .settings
 \.directory
 
-\.kdev4/cathook\.kdev4
+scripts/updater-preferences
 
-cathook\.kdev4
+/modules/*
+/modules/*/
+!/modules/readme.md
+!/modules/CMakeLists.txt
+
+scripts/partybypass-preferences
+
+*.autosave

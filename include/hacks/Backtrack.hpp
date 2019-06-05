@@ -11,6 +11,9 @@
 
 namespace hacks::shared::backtrack
 {
+extern settings::Int latency;
+extern settings::Boolean enable;
+
 struct hitboxData
 {
     Vector center{ 0.0f, 0.0f, 0.0f };
@@ -27,6 +30,7 @@ struct BacktrackData
     float simtime{ 0.0f };
     Vector entorigin{ 0.0f, 0.0f, 0.0f };
     int index{ 0 };
+    matrix3x4_t bones[128]{};
 };
 struct BestTickData
 {
@@ -38,9 +42,7 @@ struct BestTickData
     }
 };
 void Init();
-void Run();
-void Draw();
-void AddLatencyToNetchan(INetChannel *, float);
+void AddLatencyToNetchan(INetChannel *);
 void UpdateIncomingSequences();
 extern int lastincomingsequencenumber;
 extern int BestTick;
@@ -59,10 +61,12 @@ struct CIncomingSequence
 };
 typedef boost::circular_buffer_space_optimized<CIncomingSequence> circular_buf;
 extern circular_buf sequences;
-extern BacktrackData headPositions[32][66];
+extern BacktrackData headPositions[33][66];
 
 extern bool isBacktrackEnabled;
+extern bool Vischeck_Success;
 float getLatency();
+float getRealLatency();
 int getTicks();
 bool ValidTick(BacktrackData &i, CachedEntity *ent);
 } // namespace hacks::shared::backtrack

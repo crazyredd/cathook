@@ -11,30 +11,35 @@
 #include "common.hpp"
 #include "Backtrack.hpp"
 
-static settings::Bool enable{ "chams.enable", "false" };
-static settings::Bool flat{ "chams.flat", "false" };
-static settings::Bool health{ "chams.health", "false" };
-static settings::Bool teammates{ "chams.show.teammates", "false" };
-static settings::Bool players{ "chams.show.players", "true" };
-static settings::Bool medkits{ "chams.show.medkits", "false" };
-static settings::Bool ammobox{ "chams.show.ammoboxes", "false" };
-static settings::Bool buildings{ "chams.show.buildings", "true" };
-static settings::Bool stickies{ "chams.show.stickies", "true" };
-static settings::Bool teammate_buildings{ "chams.show.teammate-buildings",
-                                          "false" };
-static settings::Bool recursive{ "chams.recursive", "true" };
-static settings::Bool weapons_white{ "chams.white-weapons", "true" };
-static settings::Bool legit{ "chams.legit", "false" };
-static settings::Bool singlepass{ "chams.single-pass", "false" };
-static settings::Bool chamsself{ "chams.self", "true" };
-static settings::Bool rainbow{ "chams.self-rainbow", "true" };
-static settings::Bool disco_chams{ "chams.disco", "false" };
-
 namespace effect_chams
 {
+static settings::Boolean flat{ "chams.flat", "false" };
+static settings::Boolean health{ "chams.health", "false" };
+static settings::Boolean teammates{ "chams.show.teammates", "false" };
+static settings::Boolean players{ "chams.show.players", "true" };
+static settings::Boolean medkits{ "chams.show.medkits", "false" };
+static settings::Boolean ammobox{ "chams.show.ammoboxes", "false" };
+static settings::Boolean buildings{ "chams.show.buildings", "true" };
+static settings::Boolean stickies{ "chams.show.stickies", "true" };
+static settings::Boolean teammate_buildings{ "chams.show.teammate-buildings", "false" };
+static settings::Boolean recursive{ "chams.recursive", "true" };
+static settings::Boolean weapons_white{ "chams.white-weapons", "true" };
+static settings::Boolean legit{ "chams.legit", "false" };
+static settings::Boolean singlepass{ "chams.single-pass", "false" };
+static settings::Boolean chamsself{ "chams.self", "true" };
+static settings::Boolean rainbow{ "chams.self-rainbow", "true" };
+static settings::Boolean disco_chams{ "chams.disco", "false" };
+
+settings::Boolean enable{ "chams.enable", "false" };
+CatCommand fix_black_chams("fix_black_chams", "Fix Black Chams", []() {
+    effect_chams::g_EffectChams.Shutdown();
+    effect_chams::g_EffectChams.Init();
+});
 
 void EffectChams::Init()
 {
+    if (init)
+        return;
     logging::Info("Init EffectChams...");
     {
         KeyValues *kv = new KeyValues("UnlitGeneric");
@@ -79,18 +84,20 @@ void EffectChams::EndRenderChams()
     CMatRenderContextPtr ptr(GET_RENDER_CONTEXT);
     g_IVModelRender->ForcedMaterialOverride(nullptr);
 }
-rgba_t data[32] = {};
+static rgba_t data[33] = { colors::empty };
 void EffectChams::SetEntityColor(CachedEntity *ent, rgba_t color)
 {
+    if (ent->m_IDX > 32 || ent->m_IDX < 0)
+        return;
     data[ent->m_IDX] = color;
 }
-Timer t{};
-int prevcolor = -1;
+static Timer t{};
+static int prevcolor = -1;
 rgba_t EffectChams::ChamsColor(IClientEntity *entity)
 {
-    if (!isHackActive() || !*enable)
+    if (!isHackActive() || !*effect_chams::enable)
         return colors::empty;
-    ;
+
     CachedEntity *ent = ENTITY(entity->entindex());
     if (disco_chams)
     {
@@ -149,10 +156,14 @@ rgba_t EffectChams::ChamsColor(IClientEntity *entity)
         }
         return disco;
     }
-    if (data[entity->entindex()])
+    if (ent->m_IDX <= 32 && ent->m_IDX >= 0)
     {
-        data[entity->entindex()] = {};
-        return data[entity->entindex()];
+        if (data[entity->entindex()] != colors::empty)
+        {
+            auto toret               = data[entity->entindex()];
+            data[entity->entindex()] = colors::empty;
+            return toret;
+        }
     }
     if (CE_BAD(ent))
         return colors::white;
@@ -167,14 +178,13 @@ rgba_t EffectChams::ChamsColor(IClientEntity *entity)
     switch (ent->m_Type())
     {
     case ENTITY_BUILDING:
-        if (!ent->m_bEnemy() && !(teammates || teammate_buildings) &&
-            ent != LOCAL_E)
+        if (!ent->m_bEnemy() && !(teammates || teammate_buildings) && ent != LOCAL_E)
         {
             return colors::empty;
         }
         if (health)
         {
-            return colors::Health(ent->m_iHealth(), ent->m_iMaxHealth());
+            return colors::Health_dimgreen(ent->m_iHealth(), ent->m_iMaxHealth());
         }
         break;
     case ENTITY_PLAYER:
@@ -182,7 +192,7 @@ rgba_t EffectChams::ChamsColor(IClientEntity *entity)
             return colors::empty;
         if (health)
         {
-            return colors::Health(ent->m_iHealth(), ent->m_iMaxHealth());
+            return colors::Health_dimgreen(ent->m_iHealth(), ent->m_iMaxHealth());
         }
         break;
     default:
@@ -193,14 +203,12 @@ rgba_t EffectChams::ChamsColor(IClientEntity *entity)
 
 bool EffectChams::ShouldRenderChams(IClientEntity *entity)
 {
-    if (!isHackActive() || !*enable)
-        return false;
-    if (!enable)
+    if (!isHackActive() || !*effect_chams::enable || CE_BAD(LOCAL_E))
         return false;
     if (entity->entindex() < 0)
         return false;
     CachedEntity *ent = ENTITY(entity->entindex());
-    if (ent->m_IDX == LOCAL_E->m_IDX && !chamsself)
+    if (!chamsself && ent->m_IDX == LOCAL_E->m_IDX)
         return false;
     switch (ent->m_Type())
     {
@@ -211,8 +219,7 @@ bool EffectChams::ShouldRenderChams(IClientEntity *entity)
             return false;
         if (ent->m_iHealth() == 0 || !ent->m_iHealth())
             return false;
-        if (CE_BYTE(LOCAL_E, netvar.m_bCarryingObject) &&
-            LOCAL_E->m_vecOrigin().DistTo(ent->m_vecOrigin()) <= 100.0f)
+        if (CE_BYTE(LOCAL_E, netvar.m_bCarryingObject) && LOCAL_E->m_vecOrigin().DistTo(ent->m_vecOrigin()) <= 100.0f)
             return false;
         return true;
     case ENTITY_PLAYER:
@@ -227,8 +234,7 @@ bool EffectChams::ShouldRenderChams(IClientEntity *entity)
     case ENTITY_PROJECTILE:
         if (!ent->m_bEnemy())
             return false;
-        if (stickies &&
-            ent->m_iClassID() == CL_CLASS(CTFGrenadePipebombProjectile))
+        if (stickies && ent->m_iClassID() == CL_CLASS(CTFGrenadePipebombProjectile))
         {
             return true;
         }
@@ -256,7 +262,7 @@ bool EffectChams::ShouldRenderChams(IClientEntity *entity)
 
 void EffectChams::RenderChamsRecursive(IClientEntity *entity)
 {
-    if (!isHackActive() || !*enable)
+    if (!isHackActive() || !*effect_chams::enable)
         return;
     entity->DrawModel(1);
 
@@ -266,14 +272,12 @@ void EffectChams::RenderChamsRecursive(IClientEntity *entity)
     IClientEntity *attach;
     int passes = 0;
 
-    attach = g_IEntityList->GetClientEntity(
-        *(int *) ((uintptr_t) entity + netvar.m_Collision - 24) & 0xFFF);
+    attach = g_IEntityList->GetClientEntity(*(int *) ((uintptr_t) entity + netvar.m_Collision - 24) & 0xFFF);
     while (attach && passes++ < 32)
     {
         if (attach->ShouldDraw())
         {
-            if (entity->GetClientClass()->m_ClassID == RCC_PLAYER &&
-                re::C_BaseCombatWeapon::IsBaseCombatWeapon(attach))
+            if (entity->GetClientClass()->m_ClassID == RCC_PLAYER && re::C_BaseCombatWeapon::IsBaseCombatWeapon(attach))
             {
                 if (weapons_white)
                 {
@@ -291,14 +295,13 @@ void EffectChams::RenderChamsRecursive(IClientEntity *entity)
             else
                 attach->DrawModel(1);
         }
-        attach = g_IEntityList->GetClientEntity(
-            *(int *) ((uintptr_t) attach + netvar.m_Collision - 20) & 0xFFF);
+        attach = g_IEntityList->GetClientEntity(*(int *) ((uintptr_t) attach + netvar.m_Collision - 20) & 0xFFF);
     }
 }
 
 void EffectChams::RenderChams(IClientEntity *entity)
 {
-    if (!isHackActive() || !*enable)
+    if (!isHackActive() || !*effect_chams::enable)
         return;
     CMatRenderContextPtr ptr(GET_RENDER_CONTEXT);
     if (ShouldRenderChams(entity))
@@ -310,8 +313,7 @@ void EffectChams::RenderChams(IClientEntity *entity)
             mat_unlit_z->AlphaModulate(1.0f);
             ptr->DepthRange(0.0f, 0.01f);
             g_IVRenderView->SetColorModulation(color_2);
-            g_IVModelRender->ForcedMaterialOverride(flat ? mat_unlit_z
-                                                         : mat_lit_z);
+            g_IVModelRender->ForcedMaterialOverride(flat ? mat_unlit_z : mat_lit_z);
             RenderChamsRecursive(entity);
         }
 
@@ -325,18 +327,18 @@ void EffectChams::RenderChams(IClientEntity *entity)
         }
     }
 }
-
 void EffectChams::Render(int x, int y, int w, int h)
 {
     PROF_SECTION(DRAW_chams);
     if (!isHackActive())
         return;
-    if (!enable)
+    if (!effect_chams::enable)
+        return;
+    if (g_Settings.bInvalid)
         return;
     if (!init)
         Init();
-    if (!isHackActive() ||
-        (g_IEngine->IsTakingScreenshot() && clean_screenshots))
+    if (!isHackActive() || (g_IEngine->IsTakingScreenshot() && clean_screenshots))
         return;
     CMatRenderContextPtr ptr(GET_RENDER_CONTEXT);
     BeginRenderChams();
@@ -344,12 +346,11 @@ void EffectChams::Render(int x, int y, int w, int h)
     {
         IClientEntity *entity = g_IEntityList->GetClientEntity(i);
         if (!entity || entity->IsDormant() || CE_BAD(ENTITY(i)))
-            return;
+            continue;
         RenderChams(entity);
     }
     EndRenderChams();
 }
-
 EffectChams g_EffectChams;
 CScreenSpaceEffectRegistration *g_pEffectChams = nullptr;
 } // namespace effect_chams

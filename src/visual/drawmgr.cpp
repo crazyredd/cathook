@@ -6,19 +6,25 @@
  */
 
 #include <MiscTemporary.hpp>
-#include <hacks/Misc.hpp>
 #include <hacks/Aimbot.hpp>
 #include <hacks/hacklist.hpp>
+#if ENABLE_IMGUI_DRAWING
+#include "imgui/imrenderer.hpp"
+#elif !ENABLE_ENGINE_DRAWING
 #include <glez/glez.hpp>
 #include <glez/record.hpp>
+#include <glez/draw.hpp>
+#endif
 #include <settings/Bool.hpp>
+#include <settings/Float.hpp>
 #include <menu/GuiInterface.hpp>
 #include "common.hpp"
 #include "visual/drawing.hpp"
 #include "hack.hpp"
+#include "menu/menu/Menu.hpp"
 
-static settings::Bool info_text{ "hack-info.enable", "true" };
-static settings::Bool info_text_min{ "hack-info.minimal", "false" };
+static settings::Boolean info_text{ "hack-info.enable", "true" };
+static settings::Boolean info_text_min{ "hack-info.minimal", "false" };
 
 void render_cheat_visuals()
 {
@@ -35,68 +41,55 @@ void render_cheat_visuals()
         EndCheatVisuals();
     }
 }
-
+#if !ENABLE_ENGINE_DRAWING && !ENABLE_IMGUI_DRAWING
 glez::record::Record bufferA{};
 glez::record::Record bufferB{};
 
 glez::record::Record *buffers[] = { &bufferA, &bufferB };
-int currentBuffer               = 0;
+#endif
+int currentBuffer = 0;
 
 void BeginCheatVisuals()
 {
+#if ENABLE_IMGUI_DRAWING
+    im_renderer::bufferBegin();
+#elif !ENABLE_ENGINE_DRAWING
     buffers[currentBuffer]->begin();
+#endif
     ResetStrings();
 }
 
 std::mutex drawing_mutex;
 
+double getRandom(double lower_bound, double upper_bound)
+{
+    std::uniform_real_distribution<double> unif(lower_bound, upper_bound);
+    static std::mt19937 rand_engine(std::time(nullptr));
+
+    double x = unif(rand_engine);
+    return x;
+}
+
 void DrawCheatVisuals()
 {
-    /*#if RENDERING_ENGINE_OPENGL
-        std::lock_guard<std::mutex> draw_lock(drawing_mutex);
-    #endif*/
-    {
-        PROF_SECTION(DRAW_misc);
-        hacks::shared::misc::DrawText();
-    }
     {
         PROF_SECTION(DRAW_info);
         std::string name_s, reason_s;
         PROF_SECTION(PT_info_text);
         if (info_text)
         {
-            AddSideString("cathook by nullworks", colors::RainbowCurrent());
+            auto color = colors::RainbowCurrent();
+            color.a    = 1.0f;
+            AddSideString("cathook by nullworks", color);
             if (!info_text_min)
             {
                 AddSideString(hack::GetVersion(),
-                              GUIColor()); // github commit and date
+                              GUIColor());                  // github commit and date
                 AddSideString(hack::GetType(), GUIColor()); //  Compile type
 #if ENABLE_GUI
-                AddSideString("Press 'INSERT' key to open/close cheat menu.",
-                              GUIColor());
+                AddSideString("Press 'INSERT' key to open/close cheat menu.", GUIColor());
                 AddSideString("Use mouse to navigate in menu.", GUIColor());
 #endif
-                if (!g_IEngine->IsInGame()
-#if ENABLE_GUI
-/*
-|| g_pGUI->Visible()
-*/
-#endif
-                )
-                {
-                    // FIXME
-                    /*name_s = *force_name;
-                    if (name_s.length() < 3)
-                        name_s = "*Not Set*";
-                    reason_s   = disconnect_reason.GetString();
-                    if (reason_s.length() < 3)
-                        reason_s = "*Not Set*";
-                    AddSideString(""); // foolish
-                    AddSideString(format("Custom Name: ", name_s), GUIColor());
-                    AddSideString(
-                        format("Custom Disconnect Reason: ", reason_s),
-                        GUIColor());*/
-                }
             }
         }
     }
@@ -106,72 +99,15 @@ void DrawCheatVisuals()
     }
     {
         PROF_SECTION(DRAW_WRAPPER);
-        HookTools::DRAW();
+        EC::run(EC::Draw);
     }
     if (CE_GOOD(g_pLocalPlayer->entity) && !g_Settings.bInvalid)
     {
-        PROF_SECTION(PT_total_hacks);
-        {
-            PROF_SECTION(DRAW_aimbot);
-            hacks::shared::aimbot::DrawText();
-        }
         IF_GAME(IsTF2())
         {
             PROF_SECTION(DRAW_skinchanger);
             hacks::tf2::skinchanger::DrawText();
         }
-#ifndef FEATURE_RADAR_DISABLED
-        IF_GAME(IsTF())
-        {
-            PROF_SECTION(DRAW_radar);
-            hacks::tf::radar::Draw();
-        }
-#endif
-        IF_GAME(IsTF())
-        {
-            PROF_SECTION(DRAW_autoreflect);
-            hacks::tf::autoreflect::Draw();
-        }
-        IF_GAME(IsTF2())
-        {
-            PROF_SECTION(DRAW_backtracc);
-            hacks::shared::backtrack::Draw();
-        }
-        IF_GAME(IsTF2())
-        {
-            PROF_SECTION(DRAW_lightesp);
-            hacks::shared::lightesp::draw();
-        }
-        {
-            PROF_SECTION(DRAW_walkbot);
-            hacks::shared::walkbot::Draw();
-        }
-        {
-            PROF_SECTION(DRAW_navparse);
-            nav::Draw();
-        }
-        IF_GAME(IsTF())
-        {
-            PROF_SECTION(PT_antidisguise);
-            hacks::tf2::antidisguise::Draw();
-        }
-        IF_GAME(IsTF())
-        {
-            PROF_SECTION(PT_spyalert);
-            hacks::tf::spyalert::Draw();
-        }
-#if ENABLE_IPC
-        IF_GAME(IsTF()) hacks::shared::followbot::DrawTick();
-#endif
-        {
-            PROF_SECTION(DRAW_esp);
-            hacks::shared::esp::Draw();
-        }
-        IF_GAME(IsTF2())
-        {
-            criticals::draw();
-        }
-        hacks::tf2::autobackstab::Draw();
 #ifndef FEATURE_FIDGET_SPINNER_ENABLED
         DrawSpinner();
 #endif
@@ -191,11 +127,17 @@ void DrawCheatVisuals()
 
 void EndCheatVisuals()
 {
+#if !ENABLE_ENGINE_DRAWING && !ENABLE_IMGUI_DRAWING
     buffers[currentBuffer]->end();
+#endif
+#if !ENABLE_ENGINE_DRAWING || ENABLE_IMGUI_DRAWING
     currentBuffer = !currentBuffer;
+#endif
 }
 
 void DrawCache()
 {
+#if !ENABLE_ENGINE_DRAWING && !ENABLE_IMGUI_DRAWING
     buffers[!currentBuffer]->replay();
+#endif
 }

@@ -17,20 +17,22 @@ class EffectGlow : public IScreenSpaceEffect
 {
 public:
     virtual void Init();
-    inline virtual void Shutdown(){};
+    virtual void Shutdown();
 
-    inline virtual void SetParameters(KeyValues *params){};
+    inline virtual void SetParameters(KeyValues *params)
+    {
+    }
 
     virtual void Render(int x, int y, int w, int h);
 
     inline virtual void Enable(bool bEnable)
     {
         enabled = bEnable;
-    };
+    }
     inline virtual bool IsEnabled()
     {
         return enabled;
-    };
+    }
 
     void StartStenciling();
     void EndStenciling();

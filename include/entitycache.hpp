@@ -53,6 +53,8 @@ struct mstudiobbox_t;
 
 #define CE_GOOD(entity) (entity && !g_Settings.bInvalid && entity->Good())
 #define CE_BAD(entity) (!CE_GOOD(entity))
+#define CE_VALID(entity) (entity && !g_Settings.bInvalid && entity->Valid())
+#define CE_INVALID(entity) (!CE_VALID(entity))
 
 #define IDX_GOOD(idx) (idx >= 0 && idx <= HIGHEST_ENTITY && idx < MAX_ENTITIES)
 #define IDX_BAD(idx) !IDX_GOOD(idx)
@@ -71,8 +73,7 @@ public:
     __attribute__((hot)) void Update();
     bool IsVisible();
     void Reset();
-    __attribute__((always_inline, hot, const)) IClientEntity *
-    InternalEntity() const
+    __attribute__((always_inline, hot, const)) IClientEntity *InternalEntity() const
     {
         return g_IEntityList->GetClientEntity(m_IDX);
     }
@@ -83,9 +84,14 @@ public:
         IClientEntity *const entity = InternalEntity();
         return entity && !entity->IsDormant();
     }
-    template <typename T>
-    __attribute__((always_inline, hot, const)) inline T &
-    var(uintptr_t offset) const
+    __attribute__((always_inline, hot, const)) inline bool Valid() const
+    {
+        if (!RAW_ENT(this) || !RAW_ENT(this)->GetClientClass()->m_ClassID)
+            return false;
+        IClientEntity *const entity = InternalEntity();
+        return entity;
+    }
+    template <typename T> __attribute__((always_inline, hot, const)) inline T &var(uintptr_t offset) const
     {
         return *reinterpret_cast<T *>(uintptr_t(RAW_ENT(this)) + offset);
     }
@@ -104,6 +110,7 @@ public:
     {
         return RAW_ENT(this)->GetAbsOrigin();
     };
+    Vector m_vecDormantOrigin();
     int m_iTeam()
     {
         return NET_INT(RAW_ENT(this), netvar.iTeamNum);
@@ -136,6 +143,10 @@ public:
         else
             return 0.0f;
     };
+    Vector &m_vecAngle()
+    {
+        return CE_VECTOR(this, netvar.m_angEyeAngles);
+    };
 
     // Entity fields start here
     EntityType m_Type()
@@ -144,23 +155,9 @@ public:
         int classid    = m_iClassID();
         if (classid == CL_CLASS(CTFPlayer))
             ret = ENTITY_PLAYER;
-        else if (classid == CL_CLASS(CTFGrenadePipebombProjectile) ||
-                 classid == CL_CLASS(CTFProjectile_Cleaver) ||
-                 classid == CL_CLASS(CTFProjectile_Jar) ||
-                 classid == CL_CLASS(CTFProjectile_JarMilk) ||
-                 classid == CL_CLASS(CTFProjectile_Arrow) ||
-                 classid == CL_CLASS(CTFProjectile_EnergyBall) ||
-                 classid == CL_CLASS(CTFProjectile_EnergyRing) ||
-                 classid == CL_CLASS(CTFProjectile_GrapplingHook) ||
-                 classid == CL_CLASS(CTFProjectile_HealingBolt) ||
-                 classid == CL_CLASS(CTFProjectile_Rocket) ||
-                 classid == CL_CLASS(CTFProjectile_SentryRocket) ||
-                 classid == CL_CLASS(CTFProjectile_BallOfFire) ||
-                 classid == CL_CLASS(CTFProjectile_Flare))
+        else if (classid == CL_CLASS(CTFGrenadePipebombProjectile) || classid == CL_CLASS(CTFProjectile_Cleaver) || classid == CL_CLASS(CTFProjectile_Jar) || classid == CL_CLASS(CTFProjectile_JarMilk) || classid == CL_CLASS(CTFProjectile_Arrow) || classid == CL_CLASS(CTFProjectile_EnergyBall) || classid == CL_CLASS(CTFProjectile_EnergyRing) || classid == CL_CLASS(CTFProjectile_GrapplingHook) || classid == CL_CLASS(CTFProjectile_HealingBolt) || classid == CL_CLASS(CTFProjectile_Rocket) || classid == CL_CLASS(CTFProjectile_SentryRocket) || classid == CL_CLASS(CTFProjectile_BallOfFire) || classid == CL_CLASS(CTFProjectile_Flare))
             ret = ENTITY_PROJECTILE;
-        else if (classid == CL_CLASS(CObjectTeleporter) ||
-                 classid == CL_CLASS(CObjectSentrygun) ||
-                 classid == CL_CLASS(CObjectDispenser))
+        else if (classid == CL_CLASS(CObjectTeleporter) || classid == CL_CLASS(CObjectSentrygun) || classid == CL_CLASS(CObjectDispenser))
             ret = ENTITY_BUILDING;
         else
             ret = ENTITY_GENERIC;
@@ -184,10 +181,7 @@ public:
     };
     bool m_bGrenadeProjectile()
     {
-        return m_iClassID() == CL_CLASS(CTFGrenadePipebombProjectile) ||
-               m_iClassID() == CL_CLASS(CTFProjectile_Cleaver) ||
-               m_iClassID() == CL_CLASS(CTFProjectile_Jar) ||
-               m_iClassID() == CL_CLASS(CTFProjectile_JarMilk);
+        return m_iClassID() == CL_CLASS(CTFGrenadePipebombProjectile) || m_iClassID() == CL_CLASS(CTFProjectile_Cleaver) || m_iClassID() == CL_CLASS(CTFProjectile_Jar) || m_iClassID() == CL_CLASS(CTFProjectile_JarMilk);
     };
 
     bool m_bAnyHitboxVisible{ false };

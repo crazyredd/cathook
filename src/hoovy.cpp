@@ -37,31 +37,30 @@ bool IsHoovyHelper(CachedEntity *entity)
     return false;
 }
 
-static HookedFunction UpdateHoovyList(
-    HookedFunctions_types::HF_CreateMove, "HoovyList", 19, []() {
-        if (CE_BAD(LOCAL_E))
-            return;
+void UpdateHoovyList()
+{
+    if (CE_BAD(LOCAL_E))
+        return;
 
-        static CachedEntity *ent;
-        for (int i = 1; i < 32 && i < g_IEntityList->GetHighestEntityIndex();
-             i++)
+    static CachedEntity *ent;
+    for (int i = 1; i < 32 && i < g_IEntityList->GetHighestEntityIndex(); i++)
+    {
+        ent = ENTITY(i);
+        if (CE_GOOD(ent) && CE_BYTE(ent, netvar.iLifeState) == LIFE_ALIVE)
         {
-            ent = ENTITY(i);
-            if (CE_GOOD(ent) && CE_BYTE(ent, netvar.iLifeState) == LIFE_ALIVE)
+            if (!hoovy_list[i - 1])
             {
-                if (!hoovy_list[i - 1])
-                {
-                    if (IsHoovyHelper(ent))
-                        hoovy_list[i - 1] = true;
-                }
-                else
-                {
-                    if (!HasSandvichOut(ent))
-                        hoovy_list[i - 1] = false;
-                }
+                if (IsHoovyHelper(ent))
+                    hoovy_list[i - 1] = true;
+            }
+            else
+            {
+                if (!HasSandvichOut(ent))
+                    hoovy_list[i - 1] = false;
             }
         }
-    });
+    }
+}
 
 bool IsHoovy(CachedEntity *entity)
 {
@@ -69,3 +68,5 @@ bool IsHoovy(CachedEntity *entity)
         return false;
     return hoovy_list[entity->m_IDX - 1];
 }
+
+static InitRoutine init_heavy([]() { EC::Register(EC::CreateMove, UpdateHoovyList, "cm_hoovylist", EC::average); });

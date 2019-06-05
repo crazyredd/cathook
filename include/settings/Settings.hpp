@@ -10,7 +10,7 @@
 #include <atomic>
 
 #if ENABLE_VISUALS
-#include <glez/color.hpp>
+#include <drawing.hpp>
 #endif
 
 /*
@@ -38,7 +38,7 @@
 
 namespace settings
 {
-extern std::atomic<bool> RVarLock;
+extern std::atomic<bool> cathook_disabled;
 enum class VariableType
 {
     BOOL,
@@ -71,8 +71,7 @@ public:
 
     virtual const T &operator*() = 0;
 
-    void installChangeCallback(
-        std::function<void(VariableBase<T> &var, T after)> callback)
+    void installChangeCallback(std::function<void(VariableBase<T> &var, T after)> callback)
     {
         callbacks.push_back(callback);
     }

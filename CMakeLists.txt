@@ -3,8 +3,17 @@
 #   SDL2
 #   GLEW
 
+set(EnableCotire 1 CACHE BOOL "Enable CoTiRe (Compile Time Reducer)")
+if (EnableCotire)
+    set (CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/external/cotire/CMake")
+    cmake_policy(SET CMP0011 NEW)
+    include(cotire)
+    file(GLOB_RECURSE ignore_files *.cpp)
+    set(ignore_files ${ignore_files} CACHE INTERNAL "")
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type")
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type")
 endif()
 set(CMAKE_BUILD_TYPE_VALUES "Debug;Release" CACHE INTERNAL "List of supported build")
 set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS ${CMAKE_BUILD_TYPE_VALUES})
@@ -20,25 +29,40 @@ set(Game "tf2" CACHE STRING "Target game")
 set(GameValues "tf2;hl2dm;dab;tf2c;css;dynamic" CACHE INTERNAL "List of supported game types")
 set_property(CACHE Game PROPERTY STRINGS ${GameValues})
 
+set(EnableUnityBuilds 1 CACHE BOOL "Enable Profiler")
 set(EnableProfiler 0 CACHE BOOL "Enable Profiler")
 set(EnableVisuals 1 CACHE BOOL "Enable Visuals")
-set(LagbotMode 0 CACHE BOOL "Build light cathook made for lagbots")
 set(ExternalDrawing 0 CACHE BOOL "External Visuals")
+set(EnableEngineDrawing 0 CACHE BOOL "Draw using engine and disable libglez whenever possible")
+set(EnableImGuiDrawing 1 CACHE BOOL "Draw using ImGui's drawlists")
 set(EnableGUI 1 CACHE BOOL "Enable GUI")
 set(EnableIPC 1 CACHE BOOL "Enable IPC")
 set(DataPath "/opt/cathook/data" CACHE FILEPATH "Data location")
 set(VACBypass 0 CACHE BOOL "Textmode VAC bypass")
 set(Textmode 0 CACHE BOOL "Various textmode-only features for bots")
 set(EnableTextmodeStdin 0 CACHE BOOL "Textmode Stdin -> Console bridge (EXPERIMENTAL)")
-set(EnableWarnings 1 CACHE BOOL "Enable compile warnings")
-set(EnableNullGraphics 0 CACHE BOOL "Enable experimental textmode hooks (CRASHES)")
-set(EnableOnlineFeatures 1 CACHE BOOL "Enable online features (WIP)")
+set(EnableWarnings 0 CACHE BOOL "Enable compile warnings")
+set(EnableOnlineFeatures 0 CACHE BOOL "Enable online features (WIP)")
+set(EnableIRC 1 CACHE BOOL "Enable IRC for messaging and ignore-cathook")
+set(EnableLogging 1 CACHE BOOL "Enable logging to /tmp/")
+set(EnableClip 1 CACHE BOOL "Enable anti electron/chromium freezing")
 
 if(NOT EnableVisuals)
     set(EnableGUI 0)
 endif()
 
+if (EnableVisuals)
+    if (EnableImGuiDrawing)
+        set(EnableEngineDrawing 0)
+        find_package(Freetype REQUIRED)
+        target_include_directories(cathook PRIVATE "${FREETYPE_INCLUDE_DIRS}")
+        target_link_libraries(cathook ${FREETYPE_LIBRARIES})
+    endif()
+endif()
+
 find_package(Git REQUIRED)
+find_package(Boost REQUIRED)
+find_package(SDL2 REQUIRED)
 
 # cat packages
 
@@ -51,7 +75,7 @@ execute_process(COMMAND
 execute_process(COMMAND
         "${GIT_EXECUTABLE}" log -1 --pretty=\"%ai\"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        OUTPUT_VARIABLE GIT_COMMIT_TIME
+        OUTPUT_VARIABLE GIT_COMMITTER_DATE
         ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 find_library(ValveLibrarySDL2    NAMES libSDL2-2.0.so.0 PATHS "${PROJECT_SOURCE_DIR}/lib" NO_DEFAULT_PATH)
@@ -69,7 +93,9 @@ if(EnableOnlineFeatures)
 endif()
 
 if(EnableVisuals)
-    add_subdirectory(external/libglez)
+    if (NOT EnableEngineDrawing AND NOT EnableImGuiDrawing)
+        add_subdirectory(external/libglez)
+    endif()
     target_include_directories(cathook PRIVATE include/visual)
     find_package(SDL2 REQUIRED)
     find_package(GLEW REQUIRED)
@@ -79,17 +105,18 @@ if(EnableVisuals)
         target_include_directories(cathook PRIVATE external/libxoverlay/include)
     endif()
     target_include_directories(cathook PRIVATE "${SDL2_INCLUDE_DIRS}")
-    target_link_libraries(cathook glez ${ValveLibrarySDL2} ${GLEW_LIBRARIES})
+    if (NOT EnableEngineDrawing AND NOT EnableImGuiDrawing)
+        target_link_libraries(cathook glez)
+    endif()
+    target_link_libraries(cathook ${ValveLibrarySDL2} ${GLEW_LIBRARIES})
 endif()
 
 configure_file(include/config.h.in ${CMAKE_SOURCE_DIR}/include/config.h @ONLY)
 configure_file(include/version.h.in ${CMAKE_SOURCE_DIR}/include/version.h @ONLY)
 
-#set_target_properties(cathook PROPERTIES COMPILE_FLAGS "-m32 -msse -msse2 -msse3 -fexceptions" LINK_FLAGS "-m32 -fno-gnu-unique -fexceptions -DNDEBUG")
-set(CMAKE_CXX_FLAGS "-m32 -msse -msse2 -msse3 -fexceptions -fno-gnu-unique -DNDEBUG")
-set(CMAKE_CXX_FLAGS_DEBUG "-Og -g")
+set(CMAKE_CXX_FLAGS "-m32 -march=native -fexceptions -fno-gnu-unique -DNDEBUG")
+set(CMAKE_CXX_FLAGS_DEBUG "-rdynamic -ggdb -Og")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
-
 
 target_compile_definitions(cathook PRIVATE
         _GLIBCXX_USE_CXX11_ABI=0
@@ -127,12 +154,25 @@ add_custom_target(data
         VERBATIM)
 
 # TODO glez_LIBRARIES?
-target_link_libraries(cathook ${ValveLibraryTier0} ${ValveLibraryVStdLib} ssl)
+target_link_libraries(cathook ${ValveLibraryTier0} ${ValveLibraryVStdLib})
 set_target_properties(cathook PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 add_subdirectory(src)
 add_subdirectory(include)
 add_subdirectory(external)
+add_subdirectory(modules)
+
+if (EnableCotire)
+    set_target_properties(cathook PROPERTIES COTIRE_CXX_PREFIX_HEADER_INIT "${CMAKE_SOURCE_DIR}/include/common.hpp")
+    set_target_properties(cathook PROPERTIES COTIRE_ADD_UNITY_BUILD true)
+    set_target_properties(cathook PROPERTIES COTIRE_UNITY_SOURCE_MAXIMUM_NUMBER_OF_INCLUDES 30)
+    set_source_files_properties(${ignore_files} PROPERTIES COTIRE_EXCLUDED true)
+    cotire(cathook)
+endif()
 
 add_custom_command(TARGET cathook POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:cathook> "${CMAKE_SOURCE_DIR}/bin/$<TARGET_FILE_NAME:cathook>")
+if (EnableCotire)
+    add_custom_command(TARGET cathook_unity POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:cathook_unity> "${CMAKE_SOURCE_DIR}/bin/$<TARGET_FILE_NAME:cathook_unity>")
+endif()

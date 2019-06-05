@@ -5,8 +5,8 @@
  *      Author: nullifiedcat
  */
 
-#pragma once
-
+#ifndef CH_TIMER_HPP
+#define CH_TIMER_HPP
 #include <chrono>
 
 class Timer
@@ -18,9 +18,7 @@ public:
 
     inline bool check(unsigned ms) const
     {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(
-                   clock::now() - last)
-                   .count() >= ms;
+        return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - last).count() >= ms;
     }
     inline bool test_and_set(unsigned ms)
     {
@@ -39,3 +37,4 @@ public:
 public:
     std::chrono::time_point<clock> last{};
 };
+#endif

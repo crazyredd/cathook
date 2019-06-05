@@ -11,10 +11,7 @@
 namespace hitbox_cache
 {
 
-EntityHitboxCache::EntityHitboxCache()
-    : parent_ref(&entity_cache::Get(
-          ((unsigned) this - (unsigned) &hitbox_cache::array) /
-          sizeof(EntityHitboxCache)))
+EntityHitboxCache::EntityHitboxCache() : parent_ref(&entity_cache::Get(((unsigned) this - (unsigned) &hitbox_cache::array) / sizeof(EntityHitboxCache)))
 {
     Reset();
 }
@@ -47,9 +44,6 @@ void EntityHitboxCache::InvalidateCache()
 void EntityHitboxCache::Update()
 {
     InvalidateCache();
-    if (CE_BAD(parent_ref))
-        if (GetHitbox(0))
-            return;
 }
 
 void EntityHitboxCache::Init()
@@ -101,27 +95,30 @@ bool EntityHitboxCache::VisibilityCheck(int id)
     hitbox = GetHitbox(id);
     if (!hitbox)
         return false;
-    m_VisCheck[id] = (IsEntityVectorVisible(parent_ref, hitbox->center));
+    m_VisCheck[id]                = (IsEntityVectorVisible(parent_ref, hitbox->center));
     m_VisCheckValidationFlags[id] = true;
     return m_VisCheck[id];
 }
 
-static settings::Int setupbones_time{ "source.setupbones-time", "3" };
+static settings::Int setupbones_time{ "source.setupbones-time", "1" };
+static settings::Boolean bonecache_enabled{ "source.use-bone-cache", "false" };
 
 static std::mutex setupbones_mutex;
 
 matrix3x4_t *EntityHitboxCache::GetBones()
 {
     static float bones_setup_time = 0.0f;
-    switch ((int) setupbones_time)
+    switch (*setupbones_time)
     {
+    case 0:
+        bones_setup_time = 0.0f;
+        break;
     case 1:
         bones_setup_time = g_GlobalVars->curtime;
         break;
     case 2:
         if (CE_GOOD(LOCAL_E))
-            bones_setup_time = g_GlobalVars->interval_per_tick *
-                               CE_INT(LOCAL_E, netvar.nTickBase);
+            bones_setup_time = g_GlobalVars->interval_per_tick * CE_INT(LOCAL_E, netvar.nTickBase);
         break;
     case 3:
         if (CE_GOOD(parent_ref))
@@ -129,11 +126,36 @@ matrix3x4_t *EntityHitboxCache::GetBones()
     }
     if (!bones_setup)
     {
-        // std::lock_guard<std::mutex> lock(setupbones_mutex);
         if (g_Settings.is_create_move)
-            bones_setup = RAW_ENT(parent_ref)
-                              ->SetupBones(bones, MAXSTUDIOBONES, 0x100,
-                                           bones_setup_time);
+        {
+#if ENABLE_VISUALS
+            if (!*bonecache_enabled || parent_ref->m_Type() != ENTITY_PLAYER || IsPlayerInvisible(parent_ref))
+            {
+                PROF_SECTION(bone_setup);
+                bones_setup = RAW_ENT(parent_ref)->SetupBones(bones, MAXSTUDIOBONES, 0x7FF00, bones_setup_time);
+            }
+            else
+            {
+                PROF_SECTION(bone_cache);
+                auto to_copy = CE_VAR(parent_ref, 0x838, matrix3x4_t *);
+                if (to_copy)
+                {
+                    bones->Invalidate();
+                    memcpy((matrix3x4_t *) bones, to_copy, 48 * (CE_INT(parent_ref, 0x844)));
+                    bones_setup = true;
+                }
+                else
+                {
+                    PROF_SECTION(bone_setup);
+                    bones_setup = RAW_ENT(parent_ref)->SetupBones(bones, MAXSTUDIOBONES, 0x7FF00, bones_setup_time);
+                }
+            }
+#else
+            // Textmode bots miss/shoot at nothing when the tf2 bonecache is used
+            PROF_SECTION(bone_setup);
+            bones_setup = RAW_ENT(parent_ref)->SetupBones(bones, MAXSTUDIOBONES, 0x7FF00, bones_setup_time);
+#endif
+        }
     }
     return bones;
 }
@@ -155,35 +177,36 @@ void EntityHitboxCache::Reset()
 
 CachedHitbox *EntityHitboxCache::GetHitbox(int id)
 {
+    if (m_CacheValidationFlags[id])
+        return &m_CacheInternal[id];
     mstudiobbox_t *box;
 
     if (!m_bInit)
         Init();
     if (id < 0 || id >= m_nNumHitboxes)
-        return 0;
+        return nullptr;
     if (!m_bSuccess)
-        return 0;
+        return nullptr;
     if (CE_BAD(parent_ref))
-        return 0;
-    auto model = (model_t *) RAW_ENT(parent_ref)->GetModel();
+        return nullptr;
+    auto model = (const model_t *) RAW_ENT(parent_ref)->GetModel();
     if (!model)
-        return 0;
+        return nullptr;
     auto shdr = g_IModelInfo->GetStudiomodel(model);
     if (!shdr)
-        return 0;
+        return nullptr;
     auto set = shdr->pHitboxSet(CE_INT(parent_ref, netvar.iHitboxSet));
     if (!dynamic_cast<mstudiohitboxset_t *>(set))
-        return 0;
+        return nullptr;
     box = set->pHitbox(id);
     if (!box)
-        return 0;
+        return nullptr;
     if (box->bone < 0 || box->bone >= MAXSTUDIOBONES)
-        return 0;
+        return nullptr;
     VectorTransform(box->bbmin, GetBones()[box->bone], m_CacheInternal[id].min);
     VectorTransform(box->bbmax, GetBones()[box->bone], m_CacheInternal[id].max);
-    m_CacheInternal[id].bbox = box;
-    m_CacheInternal[id].center =
-        (m_CacheInternal[id].min + m_CacheInternal[id].max) / 2;
+    m_CacheInternal[id].bbox   = box;
+    m_CacheInternal[id].center = (m_CacheInternal[id].min + m_CacheInternal[id].max) / 2;
     m_CacheValidationFlags[id] = true;
     return &m_CacheInternal[id];
 }

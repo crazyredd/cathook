@@ -16,7 +16,7 @@ constexpr int SERIALIZE_VERSION = 3;
 
 enum class k_EState
 {
-    DEFAULT,
+    DEFAULT = 0,
     FRIEND,
     RAGE,
     IPC,
@@ -26,17 +26,18 @@ enum class k_EState
 };
 #if ENABLE_VISUALS
 extern rgba_t k_Colors[];
+static_assert(sizeof(rgba_t) == sizeof(float) * 4, "player list is going to be incompatible with no visual version");
 #endif
-const std::string k_Names[]    = { "DEFAULT", "FRIEND", "RAGE", "IPC",
-                                "DEVELOPER" };
-const char *const k_pszNames[] = { "DEFAULT", "FRIEND", "RAGE", "IPC",
-                                   "DEVELOPER" };
+const std::string k_Names[]    = { "DEFAULT", "FRIEND", "RAGE", "IPC", "DEVELOPER", "CAT" };
+const char *const k_pszNames[] = { "DEFAULT", "FRIEND", "RAGE", "IPC", "DEVELOPER", "CAT" };
 
 struct userdata
 {
     k_EState state{ k_EState::DEFAULT };
 #if ENABLE_VISUALS
     rgba_t color{ 0, 0, 0, 0 };
+#else
+    char color[16]{};
 #endif
     float inventory_value{ 0 };
     unsigned deaths_to{ 0 };
@@ -50,8 +51,7 @@ void Load();
 
 constexpr bool IsFriendly(k_EState state)
 {
-    return state == k_EState::DEVELOPER || state == k_EState::FRIEND ||
-           state == k_EState::IPC;
+    return state == k_EState::DEVELOPER || state == k_EState::FRIEND || state == k_EState::IPC;
 }
 #if ENABLE_VISUALS
 rgba_t Color(unsigned steamid);

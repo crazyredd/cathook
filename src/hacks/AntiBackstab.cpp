@@ -9,14 +9,15 @@
 #include "common.hpp"
 #include "hack.hpp"
 
-static settings::Bool enable{ "antibackstab.enable", "0" };
-static settings::Float distance{ "antibackstab.distance", "200" };
-static settings::Bool silent{ "antibackstab.silent", "1" };
-static settings::Float angle{ "antibackstab.angle", "107.5" };
-static settings::Bool sayno{ "antibackstab.nope", "0" };
-
+namespace hacks::tf2::autobackstab
+{
+extern bool angleCheck(CachedEntity *from, CachedEntity *to, std::optional<Vector> target_pos, Vector from_angle);
+}
 namespace hacks::tf2::antibackstab
 {
+static settings::Boolean enable{ "antibackstab.enable", "0" };
+static settings::Float distance{ "antibackstab.distance", "200" };
+static settings::Boolean sayno{ "antibackstab.nope", "0" };
 bool noaa = false;
 
 void SayNope()
@@ -66,19 +67,36 @@ CachedEntity *ClosestSpy()
             continue;
         if (CE_BYTE(ent, netvar.iLifeState))
             continue;
+        bool ispyro  = false;
+        bool isheavy = false;
         if (CE_INT(ent, netvar.iClass) != tf_class::tf_spy)
-            continue;
+        {
+            if (CE_INT(ent, netvar.iClass) != tf_class::tf_pyro && CE_INT(ent, netvar.iClass) != tf_class::tf_heavy)
+                continue;
+            int idx = CE_INT(ent, netvar.hActiveWeapon) & 0xFFF;
+            if (IDX_BAD(idx))
+                continue;
+            CachedEntity *pyro_weapon = ENTITY(idx);
+            if (CE_BAD(pyro_weapon))
+                continue;
+            int widx = CE_INT(pyro_weapon, netvar.iItemDefinitionIndex);
+            if (widx != 40 && widx != 1146 && widx != 656)
+                continue;
+            if (widx == 656)
+                isheavy = true;
+            ispyro = true;
+        }
         if (CE_INT(ent, netvar.iTeamNum) == g_pLocalPlayer->team)
             continue;
         if (IsPlayerInvisible(ent))
             continue;
         dist = ent->m_flDistance();
-        if (fabs(GetAngle(ent)) > (float) angle)
+        if ((ispyro && !isheavy && fabs(GetAngle(ent)) > 90.0f) || (isheavy && fabs(GetAngle(ent)) > 132.0f))
         {
             break;
             // logging::Info("Backstab???");
         }
-        if (dist < (float) distance && (dist < closest_dist || !closest_dist))
+        if ((((!ispyro && dist < (float) distance)) || (ispyro && !isheavy && dist < 314.0f) || (isheavy && dist < 120.0f)) && (dist < closest_dist || !closest_dist))
         {
             closest_dist = dist;
             closest      = ent;
@@ -92,20 +110,28 @@ void CreateMove()
     CachedEntity *spy;
     Vector diff;
 
-    if (!enable)
+    if (!enable || CE_BAD(LOCAL_E))
         return;
-    spy                   = ClosestSpy();
+    spy = ClosestSpy();
     if (spy)
     {
         noaa = true;
-        current_user_cmd->viewangles.x = 160.0f;
-        if (silent)
-            g_pLocalPlayer->bUseSilentAngles = true;
+        if (current_user_cmd->buttons & IN_ATTACK)
+            return;
+        Vector spy_angle;
+        spy_angle = CE_VECTOR(spy, netvar.m_angEyeAngles);
+        fClampAngle(spy_angle);
+        bool couldbebackstabbed = hacks::tf2::autobackstab::angleCheck(spy, LOCAL_E, std::nullopt, spy_angle);
+        if (couldbebackstabbed || CE_INT(spy, netvar.iClass) == tf_class::tf_heavy)
+            current_user_cmd->viewangles.x = 150.0f;
+        g_pLocalPlayer->bUseSilentAngles = true;
         if (sayno)
             SayNope();
+        *bSendPackets = true;
     }
     else
         noaa = false;
-
 }
+
+static InitRoutine EC([]() { EC::Register(EC::CreateMove, CreateMove, "antibackstab", EC::late); });
 } // namespace hacks::tf2::antibackstab

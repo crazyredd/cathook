@@ -9,6 +9,7 @@
 
 #include <time.h>
 #include <settings/Float.hpp>
+#include "soundcache.hpp"
 
 bool IsProjectileACrit(CachedEntity *ent)
 {
@@ -17,10 +18,7 @@ bool IsProjectileACrit(CachedEntity *ent)
     return CE_BYTE(ent, netvar.Rocket_bCritical);
 }
 // This method of const'ing the index is weird.
-CachedEntity::CachedEntity()
-    : m_IDX(int(((unsigned) this - (unsigned) &entity_cache::array) /
-                sizeof(CachedEntity))),
-      hitboxes(hitbox_cache::Get(unsigned(m_IDX)))
+CachedEntity::CachedEntity() : m_IDX(int(((unsigned) this - (unsigned) &entity_cache::array) / sizeof(CachedEntity))), hitboxes(hitbox_cache::Get(unsigned(m_IDX)))
 {
 #if PROXY_ENTITY != true
     m_pEntity = nullptr;
@@ -46,7 +44,7 @@ CachedEntity::~CachedEntity()
 }
 
 static settings::Float ve_window{ "debug.ve.window", "0" };
-static settings::Bool ve_smooth{ "debug.ve.smooth", "true" };
+static settings::Boolean ve_smooth{ "debug.ve.smooth", "true" };
 static settings::Int ve_averager_size{ "debug.ve.averaging", "0" };
 
 void CachedEntity::Update()
@@ -77,13 +75,11 @@ void CachedEntity::Update()
 }
 
 // FIXME maybe disable this by default
-static settings::Bool fast_vischeck{ "debug.fast-vischeck", "true" };
+static settings::Boolean fast_vischeck{ "debug.fast-vischeck", "true" };
 
 bool CachedEntity::IsVisible()
 {
-    static constexpr int optimal_hitboxes[] = {
-        hitbox_t::head, hitbox_t::foot_L, hitbox_t::hand_R, hitbox_t::spine_1
-    };
+    static constexpr int optimal_hitboxes[] = { hitbox_t::head, hitbox_t::foot_L, hitbox_t::hand_R, hitbox_t::spine_1 };
     static bool vischeck0, vischeck;
 
     PROF_SECTION(CE_IsVisible);
@@ -130,6 +126,15 @@ bool CachedEntity::IsVisible()
     m_bVisCheckComplete = true;
 
     return false;
+}
+
+Vector CachedEntity::m_vecDormantOrigin()
+{
+    if (!RAW_ENT(this)->IsDormant())
+        return m_vecOrigin();
+    else if (!sound_cache[m_IDX].last_update.check(10000) && !sound_cache[m_IDX].sound.m_pOrigin.IsZero())
+        return sound_cache[m_IDX].sound.m_pOrigin;
+    return Vector(0.0f);
 }
 
 namespace entity_cache

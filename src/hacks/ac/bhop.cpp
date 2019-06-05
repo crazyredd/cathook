@@ -9,11 +9,9 @@
 #include <settings/Int.hpp>
 #include "common.hpp"
 
-static settings::Int bhop_detect_count{ "find-cheaters.bunnyhop.detections",
-                                        "4" };
-
 namespace ac::bhop
 {
+static settings::Int bhop_detect_count{ "find-cheaters.bunnyhop.detections", "4" };
 
 ac_data data_table[32]{};
 
@@ -57,13 +55,10 @@ void Update(CachedEntity *player)
                 // TODO FIXME
                 if (data.detections >= int(bhop_detect_count))
                 {
-                    logging::Info("[%d] Suspected BHop: %d", player->m_IDX,
-                                  data.detections);
+                    logging::Info("[%d] Suspected BHop: %d", player->m_IDX, data.detections);
                     if ((tickcount - data.last_accusation) > 600)
                     {
-                        hacks::shared::anticheat::Accuse(
-                            player->m_IDX, "Bunnyhop",
-                            format("Perfect jumps = ", data.detections));
+                        hacks::shared::anticheat::Accuse(player->m_IDX, "Bunnyhop", format("Perfect jumps = ", data.detections));
                         data.last_accusation = tickcount;
                     }
                 }

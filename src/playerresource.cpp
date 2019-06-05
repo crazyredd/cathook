@@ -25,6 +25,21 @@ void TFPlayerResource::Update()
     }
 }
 
+int TFPlayerResource::GetHealth(CachedEntity *player)
+{
+    IClientEntity *ent;
+    int idx;
+    /* :thinking */
+    IF_GAME(!IsTF()) return 100;
+    ent = g_IEntityList->GetClientEntity(entity);
+    if (!ent || ent->GetClientClass()->m_ClassID != RCC_PLAYERRESOURCE)
+        return 0;
+    idx = player->m_IDX;
+    if (idx >= 64 || idx < 0)
+        return 0;
+    return *(int *) ((unsigned) ent + netvar.m_iHealth_Resource + 4 * idx);
+}
+
 int TFPlayerResource::GetMaxHealth(CachedEntity *player)
 {
     IClientEntity *ent;
@@ -76,7 +91,66 @@ int TFPlayerResource::GetScore(int idx)
     ent = g_IEntityList->GetClientEntity(entity);
     if (!ent || ent->GetClientClass()->m_ClassID != RCC_PLAYERRESOURCE)
         return 0;
-    return *(int *) ((unsigned) ent + netvar.res_iScore + 4 * idx);
+    return *(int *) ((unsigned) ent + netvar.m_iTotalScore_Resource + 4 * idx);
+}
+
+int TFPlayerResource::GetKills(int idx)
+{
+    IClientEntity *ent;
+
+    if (idx >= 32 || idx < 1)
+        return 0;
+    ent = g_IEntityList->GetClientEntity(entity);
+    if (!ent || ent->GetClientClass()->m_ClassID != RCC_PLAYERRESOURCE)
+        return 0;
+    return *(int *) ((unsigned) ent + netvar.m_iKills_Resource + 4 * idx);
+}
+
+int TFPlayerResource::GetDeaths(int idx)
+{
+    IClientEntity *ent;
+
+    if (idx >= 32 || idx < 1)
+        return 0;
+    ent = g_IEntityList->GetClientEntity(entity);
+    if (!ent || ent->GetClientClass()->m_ClassID != RCC_PLAYERRESOURCE)
+        return 0;
+    return *(int *) ((unsigned) ent + netvar.m_iDeaths_Resource + 4 * idx);
+}
+
+int TFPlayerResource::GetLevel(int idx)
+{
+    IClientEntity *ent;
+
+    if (idx >= 32 || idx < 1)
+        return 0;
+    ent = g_IEntityList->GetClientEntity(entity);
+    if (!ent || ent->GetClientClass()->m_ClassID != RCC_PLAYERRESOURCE)
+        return 0;
+    return *(int *) ((unsigned) ent + netvar.m_iPlayerLevel_Resource + 4 * idx);
+}
+
+int TFPlayerResource::GetDamage(int idx)
+{
+    IClientEntity *ent;
+
+    if (idx >= 32 || idx < 1)
+        return 0;
+    ent = g_IEntityList->GetClientEntity(entity);
+    if (!ent || ent->GetClientClass()->m_ClassID != RCC_PLAYERRESOURCE)
+        return 0;
+    return *(int *) ((unsigned) ent + netvar.m_iDamage_Resource + 4 * idx);
+}
+int TFPlayerResource::GetPing(int idx)
+{
+    IClientEntity *ent;
+
+    if (idx >= 32 || idx < 1)
+        return 0;
+    ent = g_IEntityList->GetClientEntity(entity);
+    if (!ent || ent->GetClientClass()->m_ClassID != RCC_PLAYERRESOURCE)
+        return 0;
+    return *(int *) ((unsigned) ent + netvar.m_iPing_Resource + 4 * idx);
 }
 
 int TFPlayerResource::GetClass(CachedEntity *player)

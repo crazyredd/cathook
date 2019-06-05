@@ -20,8 +20,7 @@
 #include <config.h>
 #include <core/logging.hpp>
 
-static void recursiveXmlResolveIncludes(const std::string &directory,
-                                        tinyxml2::XMLElement *element)
+static void recursiveXmlResolveIncludes(const std::string &directory, tinyxml2::XMLElement *element)
 {
     printf("recursively resolving includes for element %s\n", element->Name());
     auto c = element->FirstChildElement();
@@ -41,8 +40,7 @@ static void recursiveXmlResolveIncludes(const std::string &directory,
                 if (tinyxml2::XML_SUCCESS == document.LoadFile(fp.c_str()))
                 {
                     printf("File loaded\n");
-                    auto content =
-                        document.RootElement()->DeepClone(c->GetDocument());
+                    auto content = document.RootElement()->DeepClone(c->GetDocument());
                     element->InsertAfterChild(c, content);
                     element->DeleteChild(c);
                     c = content->ToElement();
@@ -79,8 +77,8 @@ Menu *Menu::instance{ nullptr };
 namespace resource::font
 {
 // FIXME dynamic font change..
-glez::font base{ DATA_PATH "/menu/Verdana.ttf", 10 };
-glez::font bold{ DATA_PATH "/menu/VerdanaBold.ttf", 9 };
+fonts::font base{ DATA_PATH "/menu/Verdana.ttf", 12 };
+fonts::font bold{ DATA_PATH "/menu/VerdanaBold.ttf", 11 };
 } // namespace resource::font
 
 namespace style::colors
@@ -155,8 +153,7 @@ void Menu::update()
             --modal_close_next_frame;
         }
         if (modal_close_next_frame != 0)
-            printf("WARNING: %d queued modal close events, modal stack empty\n",
-                   modal_close_next_frame);
+            printf("WARNING: %d queued modal close events, modal stack empty\n", modal_close_next_frame);
     }
     int mx, my;
     SDL_GetMouseState(&mx, &my);
@@ -232,8 +229,7 @@ void Menu::handleMessage(Message &msg, bool is_relayed)
     {
         if (!modal_stack.empty())
         {
-            printf("%p[%u] requested close, top %p\n", msg.sender,
-                   msg.sender->uid, modal_stack.back().get());
+            printf("%p[%u] requested close, top %p\n", msg.sender, msg.sender->uid, modal_stack.back().get());
             if (modal_stack.back().get() == msg.sender)
                 ++modal_close_next_frame;
         }

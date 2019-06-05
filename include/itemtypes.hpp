@@ -7,82 +7,11 @@
 
 #pragma once
 
-#include <map>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
-const std::string tf2c_weapon_names[] = { "BOTTLE",
-                                          "GRENADE_NAPALM",
-                                          "SUPERSHOTGUN_MERCENARY",
-                                          "ROCKETBETA",
-                                          "GRENADE_GRENADELAUNCHER",
-                                          "GRENADELAUNCHER",
-                                          "GRENADE_PIPEBOMB",
-                                          "CIGARETTE_CASE",
-                                          "BRANDINGIRON",
-                                          "BANHAMMER",
-                                          "SNIPERRIFLE",
-                                          "GRENADE_HEAL",
-                                          "HAMMERFISTS",
-                                          "GRENADE_NAIL",
-                                          "DART",
-                                          "RPG",
-                                          "UMBRELLA_CIVILIAN",
-                                          "GRENADE_FRAG",
-                                          "GRENADE_MIRV",
-                                          "MEDIGUN",
-                                          "GRENADE_MIRV_DEMO",
-                                          "PICKAXE",
-                                          "SYRINGEGUN",
-                                          "SCATTERGUN",
-                                          "STENGUN",
-                                          "SNUBNOSE",
-                                          "MINIGUN",
-                                          "WRENCH",
-                                          "BAT",
-                                          "SAPPER",
-                                          "ROCKET",
-                                          "HAMMER",
-                                          "FISHWHACKER",
-                                          "KRITZKRIEG",
-                                          "FLAREGUN",
-                                          "SHOVEL",
-                                          "PISTOL",
-                                          "SMG",
-                                          "LEADPIPE",
-                                          "FLAREGUN_SHELL",
-                                          "GRENADE_EMP",
-                                          "CYCLOPS",
-                                          "MACHETE",
-                                          "SHOTGUN",
-                                          "REVOLVER",
-                                          "GRENADE_GAS",
-                                          "GRENADE_BEARTRAP",
-                                          "FIREAXE",
-                                          "GRENADE_CONC",
-                                          "NAILGUN",
-                                          "BONESAW",
-                                          "STICKYBOMB_LAUNCHER",
-                                          "GRENADE_BOMBLET",
-                                          "TRANQ",
-                                          "DYNAMITE",
-                                          "CLUB",
-                                          "TOMMYGUN",
-                                          "COFFEPOT",
-                                          "STICKYBOMB",
-                                          "ROCKETLAUNCHER",
-                                          "FLAMETHROWER",
-                                          "CROWBAR",
-                                          "BUILDER",
-                                          "HEAVY_ARTILLERY",
-                                          "KNIFE",
-                                          "PDA_ENGINEER",
-                                          "BOTTLE_BROKEN",
-                                          "TOOLBOX",
-                                          "SYRINGE_PROJ",
-                                          "NAIL",
-                                          "SYRINGE",
-                                          "OVERHEALER" };
+const std::string tf2c_weapon_names[] = { "BOTTLE", "GRENADE_NAPALM", "SUPERSHOTGUN_MERCENARY", "ROCKETBETA", "GRENADE_GRENADELAUNCHER", "GRENADELAUNCHER", "GRENADE_PIPEBOMB", "CIGARETTE_CASE", "BRANDINGIRON", "BANHAMMER", "SNIPERRIFLE", "GRENADE_HEAL", "HAMMERFISTS", "GRENADE_NAIL", "DART", "RPG", "UMBRELLA_CIVILIAN", "GRENADE_FRAG", "GRENADE_MIRV", "MEDIGUN", "GRENADE_MIRV_DEMO", "PICKAXE", "SYRINGEGUN", "SCATTERGUN", "STENGUN", "SNUBNOSE", "MINIGUN", "WRENCH", "BAT", "SAPPER", "ROCKET", "HAMMER", "FISHWHACKER", "KRITZKRIEG", "FLAREGUN", "SHOVEL", "PISTOL", "SMG", "LEADPIPE", "FLAREGUN_SHELL", "GRENADE_EMP", "CYCLOPS", "MACHETE", "SHOTGUN", "REVOLVER", "GRENADE_GAS", "GRENADE_BEARTRAP", "FIREAXE", "GRENADE_CONC", "NAILGUN", "BONESAW", "STICKYBOMB_LAUNCHER", "GRENADE_BOMBLET", "TRANQ", "DYNAMITE", "CLUB", "TOMMYGUN", "COFFEPOT", "STICKYBOMB", "ROCKETLAUNCHER", "FLAMETHROWER", "CROWBAR", "BUILDER", "HEAVY_ARTILLERY", "KNIFE", "PDA_ENGINEER", "BOTTLE_BROKEN", "TOOLBOX", "SYRINGE_PROJ", "NAIL", "SYRINGE", "OVERHEALER" };
 
 enum k_EItemType
 {
@@ -210,8 +139,8 @@ public:
     void RegisterItem(std::string modelpath, k_EItemType type);
     k_EItemType GetItemType(CachedEntity *entity);
 
-    std::map<std::string, k_EItemType> models;
-    std::map<uintptr_t, k_EItemType> map;
+    std::unordered_map<std::string, k_EItemType> models;
+    std::unordered_map<uintptr_t, k_EItemType> map;
 };
 
 class ItemManager
@@ -222,7 +151,7 @@ public:
     void RegisterSpecialMapping(ItemCheckerFn fn, k_EItemType type);
     k_EItemType GetItemType(CachedEntity *ent);
 
-    std::map<ItemCheckerFn, k_EItemType> special_map;
+    std::unordered_map<ItemCheckerFn, k_EItemType> special_map;
     std::vector<ItemSpecialMapperFn> specials;
     ItemModelMapper mapper_special;
     ItemModelMapper mapper;

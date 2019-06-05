@@ -12,51 +12,53 @@
 #include <inetchannel.h>
 #include <inetmessage.h>
 #include <inetmsghandler.h>
+#include <KeyValues.h>
+#include "bitvec.h"
 
-#define DECLARE_BASE_MESSAGE(msgtype)                                          \
-public:                                                                        \
-    bool ReadFromBuffer(bf_read &buffer);                                      \
-    bool WriteToBuffer(bf_write &buffer);                                      \
-    const char *ToString() const;                                              \
-    int GetType() const                                                        \
-    {                                                                          \
-        return msgtype;                                                        \
-    }                                                                          \
-    const char *GetName() const                                                \
-    {                                                                          \
-        return #msgtype;                                                       \
+#define DECLARE_BASE_MESSAGE(msgtype)     \
+public:                                   \
+    bool ReadFromBuffer(bf_read &buffer); \
+    bool WriteToBuffer(bf_write &buffer); \
+    const char *ToString() const;         \
+    int GetType() const                   \
+    {                                     \
+        return msgtype;                   \
+    }                                     \
+    const char *GetName() const           \
+    {                                     \
+        return #msgtype;                  \
     }
 
-#define DECLARE_NET_MESSAGE(name)                                              \
-    DECLARE_BASE_MESSAGE(net_##name);                                          \
-    INetMessageHandler *m_pMessageHandler;                                     \
-    bool Process()                                                             \
-    {                                                                          \
-        return false;                                                          \
+#define DECLARE_NET_MESSAGE(name)          \
+    DECLARE_BASE_MESSAGE(net_##name);      \
+    INetMessageHandler *m_pMessageHandler; \
+    bool Process()                         \
+    {                                      \
+        return false;                      \
     }
 
-#define DECLARE_SVC_MESSAGE(name)                                              \
-    DECLARE_BASE_MESSAGE(svc_##name);                                          \
-    IServerMessageHandler *m_pMessageHandler;                                  \
-    bool Process()                                                             \
-    {                                                                          \
-        return m_pMessageHandler->Process##name(this);                         \
+#define DECLARE_SVC_MESSAGE(name)                      \
+    DECLARE_BASE_MESSAGE(svc_##name);                  \
+    IServerMessageHandler *m_pMessageHandler;          \
+    bool Process()                                     \
+    {                                                  \
+        return m_pMessageHandler->Process##name(this); \
     }
 
-#define DECLARE_CLC_MESSAGE(name)                                              \
-    DECLARE_BASE_MESSAGE(clc_##name);                                          \
-    IClientMessageHandler *m_pMessageHandler;                                  \
-    bool Process()                                                             \
-    {                                                                          \
-        return m_pMessageHandler->Process##name(this);                         \
+#define DECLARE_CLC_MESSAGE(name)                      \
+    DECLARE_BASE_MESSAGE(clc_##name);                  \
+    IClientMessageHandler *m_pMessageHandler;          \
+    bool Process()                                     \
+    {                                                  \
+        return m_pMessageHandler->Process##name(this); \
     }
 
-#define DECLARE_MM_MESSAGE(name)                                               \
-    DECLARE_BASE_MESSAGE(mm_##name);                                           \
-    IMatchmakingMessageHandler *m_pMessageHandler;                             \
-    bool Process()                                                             \
-    {                                                                          \
-        return m_pMessageHandler->Process##name(this);                         \
+#define DECLARE_MM_MESSAGE(name)                       \
+    DECLARE_BASE_MESSAGE(mm_##name);                   \
+    IMatchmakingMessageHandler *m_pMessageHandler;     \
+    bool Process()                                     \
+    {                                                  \
+        return m_pMessageHandler->Process##name(this); \
     }
 
 class CNetMessage : public INetMessage
@@ -117,9 +119,8 @@ protected:
 #define svc_Print 7      // print text to console
 #define svc_ServerInfo 8 // first message from server about game, map etc
 #define svc_SendTable 9  // sends a sendtable description for a game class
-#define svc_ClassInfo                                                          \
-    10 // Info about classes (first byte is a CLASSINFO_ define).
-#define svc_SetPause 11 // tells client if server paused or unpaused
+#define svc_ClassInfo 10 // Info about classes (first byte is a CLASSINFO_ define).
+#define svc_SetPause 11  // tells client if server paused or unpaused
 
 #define svc_CreateStringTable 12 // inits shared string tables
 #define svc_UpdateStringTable 13 // updates a string table
@@ -131,10 +132,9 @@ protected:
 
 #define svc_Sounds 17 // starts playing sound
 
-#define svc_SetView 18  // sets entity as point of view
-#define svc_FixAngle 19 // sets/corrects players viewangle
-#define svc_CrosshairAngle                                                     \
-    20 // adjusts crosshair in auto aim mode to lock on traget
+#define svc_SetView 18        // sets entity as point of view
+#define svc_FixAngle 19       // sets/corrects players viewangle
+#define svc_CrosshairAngle 20 // adjusts crosshair in auto aim mode to lock on traget
 
 #define svc_BSPDecal 21 // add a static decal to the worl BSP
 // NOTE: This is now unused!
@@ -156,8 +156,7 @@ protected:
 
 #define svc_GameEventList 30 // list of known games events and fields
 
-#define svc_GetCvarValue                                                       \
-    31 // Server wants to know the value of a cvar on the client.
+#define svc_GetCvarValue 31 // Server wants to know the value of a cvar on the client.
 
 #define SVC_LASTMSG 31 // last known server messages
 
@@ -165,15 +164,14 @@ protected:
 // client to server
 //
 
-#define clc_ClientInfo 8    // client info (table CRC etc)
-#define clc_Move 9          // [CUserCmd]
-#define clc_VoiceData 10    // Voicestream data from a client
-#define clc_BaselineAck 11  // client acknowledges a new baseline seqnr
-#define clc_ListenEvents 12 // client acknowledges a new baseline seqnr
-#define clc_RespondCvarValue                                                   \
-    13 // client is responding to a svc_GetCvarValue message.
-#define clc_FileCRCCheck                                                       \
-    14 // client is sending a file's CRC to the server to be verified.
+#define clc_ClientInfo 8        // client info (table CRC etc)
+#define clc_Move 9              // [CUserCmd]
+#define clc_VoiceData 10        // Voicestream data from a client
+#define clc_BaselineAck 11      // client acknowledges a new baseline seqnr
+#define clc_ListenEvents 12     // client acknowledges a new baseline seqnr
+#define clc_RespondCvarValue 13 // client is responding to a svc_GetCvarValue message.
+#define clc_FileCRCCheck 14     // client is sending a file's CRC to the server to be verified.
+#define clc_CmdKeyValues 16     // client gets sent some update
 
 #define CLC_LASTMSG 14 //	last known client message
 
@@ -183,13 +181,11 @@ protected:
 typedef int QueryCvarCookie_t;
 typedef enum
 {
-    eQueryCvarValueStatus_ValueIntact  = 0, // It got the value fine.
-    eQueryCvarValueStatus_CvarNotFound = 1,
-    eQueryCvarValueStatus_NotACvar =
-        2, // There's a ConCommand, but it's not a ConVar.
-    eQueryCvarValueStatus_CvarProtected =
-        3 // The cvar was marked with FCVAR_SERVER_CAN_NOT_QUERY, so the server
-          // is not allowed to have its value.
+    eQueryCvarValueStatus_ValueIntact   = 0, // It got the value fine.
+    eQueryCvarValueStatus_CvarNotFound  = 1,
+    eQueryCvarValueStatus_NotACvar      = 2, // There's a ConCommand, but it's not a ConVar.
+    eQueryCvarValueStatus_CvarProtected = 3  // The cvar was marked with FCVAR_SERVER_CAN_NOT_QUERY, so the server
+                                             // is not allowed to have its value.
 } EQueryCvarValueStatus;
 
 class CLC_RespondCvarValue : public CNetMessage
@@ -297,6 +293,56 @@ public:
     bf_read m_DataIn;
     bf_write m_DataOut;
     uint64 m_xuid;
+};
+
+class CLC_BaselineAck : public CNetMessage
+{
+    DECLARE_CLC_MESSAGE(BaselineAck);
+
+    CLC_BaselineAck(){};
+    CLC_BaselineAck(int tick, int baseline)
+    {
+        m_nBaselineTick = tick;
+        m_nBaselineNr   = baseline;
+    }
+
+    int GetGroup() const
+    {
+        return INetChannelInfo::ENTITIES;
+    }
+
+public:
+    int m_nBaselineTick; // sequence number of baseline
+    int m_nBaselineNr;   // 0 or 1
+};
+
+class CLC_ListenEvents : public CNetMessage
+{
+    DECLARE_CLC_MESSAGE(ListenEvents);
+
+    int GetGroup() const
+    {
+        return INetChannelInfo::SIGNON;
+    }
+
+public:
+    CBitVec<1 << 9> m_EventArray;
+};
+
+class CLC_CmdKeyValues : public CNetMessage
+{
+    DECLARE_CLC_MESSAGE(CmdKeyValues);
+
+    int GetGroup() const
+    {
+        return INetChannelInfo::GENERIC;
+    };
+    CLC_CmdKeyValues()
+    {
+        m_bReliable = false;
+    };
+
+public:
 };
 
 class NET_SetConVar : public CNetMessage

@@ -32,10 +32,25 @@ void SetCVarInterface(ICvar *iface);
 #include <sstream>
 #include <vector>
 #include <mutex>
+#include <random>
 
 #include <core/sdk.hpp>
 
 // typedef void ( *FnCommandCallback_t )( const CCommand &command );
+
+template <typename Iter, typename RandomGenerator> Iter select_randomly(Iter start, Iter end, RandomGenerator &g)
+{
+    std::uniform_int_distribution<> dis(0, std::distance(start, end) - 1);
+    std::advance(start, dis(g));
+    return start;
+}
+
+template <typename Iter> Iter select_randomly(Iter start, Iter end)
+{
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    return select_randomly(start, end, gen);
+}
 
 // TODO split this shit
 
@@ -59,8 +74,7 @@ Vector GetBuildingPosition(CachedEntity *ent);
 bool IsBuildingVisible(CachedEntity *ent);
 
 ConVar *CreateConVar(std::string name, std::string value, std::string help);
-ConCommand *CreateConCommand(const char *name, FnCommandCallback_t callback,
-                             const char *help);
+ConCommand *CreateConCommand(const char *name, FnCommandCallback_t callback, const char *help);
 
 powerup_type GetPowerupOnPlayer(CachedEntity *player);
 // GetHitbox() is being called really frequently.
@@ -71,17 +85,14 @@ weaponmode GetWeaponMode();
 
 void FixMovement(CUserCmd &cmd, Vector &viewangles);
 void VectorAngles(Vector &forward, Vector &angles);
+void AngleVectors2(const QAngle &angles, Vector *forward);
 extern std::mutex trace_lock;
 bool IsEntityVisible(CachedEntity *entity, int hb);
-bool IsEntityVectorVisible(CachedEntity *entity, Vector endpos);
+bool IsEntityVectorVisible(CachedEntity *entity, Vector endpos, unsigned int mask = MASK_SHOT_HULL, trace_t *trace = nullptr);
 bool VisCheckEntFromEnt(CachedEntity *startEnt, CachedEntity *endEnt);
-bool VisCheckEntFromEntVector(Vector startVector, CachedEntity *startEnt,
-                              CachedEntity *endEnt);
-Vector VischeckCorner(CachedEntity *player, CachedEntity *target, float maxdist,
-                      bool checkWalkable);
-std::pair<Vector, Vector> VischeckWall(CachedEntity *player,
-                                       CachedEntity *target, float maxdist,
-                                       bool checkWalkable);
+bool VisCheckEntFromEntVector(Vector startVector, CachedEntity *startEnt, CachedEntity *endEnt);
+Vector VischeckCorner(CachedEntity *player, CachedEntity *target, float maxdist, bool checkWalkable);
+std::pair<Vector, Vector> VischeckWall(CachedEntity *player, CachedEntity *target, float maxdist, bool checkWalkable);
 float vectorMax(Vector i);
 Vector vectorAbs(Vector i);
 bool canReachVector(Vector loc, Vector dest = { 0, 0, 0 });
@@ -92,13 +103,18 @@ float DistToSqr(CachedEntity *entity);
 void fClampAngle(Vector &qaAng);
 // const char* MakeInfoString(IClientEntity* player);
 bool GetProjectileData(CachedEntity *weapon, float &speed, float &gravity);
-bool IsVectorVisible(Vector a, Vector b, bool enviroment_only = false);
+bool IsVectorVisible(Vector a, Vector b, bool enviroment_only = false, CachedEntity *self = LOCAL_E);
+Vector GetForwardVector(Vector origin, Vector viewangles, float distance);
+Vector GetForwardVector(float distance);
 bool IsSentryBuster(CachedEntity *ent);
 std::unique_ptr<char[]> strfmt(const char *fmt, ...);
 // TODO move that to weaponid.h
 bool HasWeapon(CachedEntity *ent, int wantedId);
 bool IsAmbassador(CachedEntity *ent);
 bool AmbassadorCanHeadshot();
+
+// Convert a TF2 handle into an IDX -> ENTITY(IDX)
+int HandleToIDX(int handle);
 
 inline const char *teamname(int team)
 {
@@ -119,11 +135,18 @@ inline const char *classname(int clazz)
 }
 
 void PrintChat(const char *fmt, ...);
+void ChangeName(std::string name);
 
 void WhatIAmLookingAt(int *result_eindex, Vector *result_pos);
 
-void Patch(void *address, void *patch, size_t length);
-
+inline Vector GetAimAtAngles(Vector origin, Vector target)
+{
+    Vector angles, tr;
+    tr = (target - origin);
+    VectorAngles(tr, angles);
+    fClampAngle(angles);
+    return angles;
+}
 void AimAt(Vector origin, Vector target, CUserCmd *cmd);
 void AimAtHitbox(CachedEntity *ent, int hitbox, CUserCmd *cmd);
 bool IsProjectileCrit(CachedEntity *ent);
@@ -144,6 +167,7 @@ bool IsEntityVisiblePenetration(CachedEntity *entity, int hb);
 // void EndPrediction();
 
 float RandFloatRange(float min, float max);
+int UniformRandomInt(int min, int max);
 
 bool Developer(CachedEntity *ent);
 
@@ -151,17 +175,17 @@ Vector CalcAngle(Vector src, Vector dst);
 void MakeVector(Vector ang, Vector &out);
 float GetFov(Vector ang, Vector src, Vector dst);
 
-void ReplaceString(std::string &input, const std::string &what,
-                   const std::string &with_what);
+void ReplaceString(std::string &input, const std::string &what, const std::string &with_what);
+void ReplaceSpecials(std::string &input);
 
 std::pair<float, float> ComputeMove(const Vector &a, const Vector &b);
+std::pair<float, float> ComputeMovePrecise(const Vector &a, const Vector &b);
 void WalkTo(const Vector &vector);
 
 std::string GetLevelName();
 
 void format_internal(std::stringstream &stream);
-template <typename T, typename... Targs>
-void format_internal(std::stringstream &stream, T value, Targs... args)
+template <typename T, typename... Targs> void format_internal(std::stringstream &stream, T value, Targs... args)
 {
     stream << value;
     format_internal(stream, args...);

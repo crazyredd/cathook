@@ -8,14 +8,13 @@
 #include <menu/menu/special/SettingsManagerList.hpp>
 #include <menu/menu/special/PlayerListController.hpp>
 #include <hack.hpp>
+#include <common.hpp>
 
 static settings::Button open_gui_button{ "visual.open-gui-button", "Insert" };
 
 static bool init_done{ false };
 
-static std::unique_ptr<zerokernel::special::PlayerListController> controller{
-    nullptr
-};
+static std::unique_ptr<zerokernel::special::PlayerListController> controller{ nullptr };
 
 static zerokernel::special::PlayerListData createPlayerListData(int userid)
 {
@@ -27,7 +26,7 @@ static zerokernel::special::PlayerListData createPlayerListData(int userid)
     data.teamId  = g_pPlayerResource->getTeam(idx) - 1;
     data.dead    = !g_pPlayerResource->isAlive(idx);
     data.steam   = info.friendsID;
-    logging::Info("Player name: %s", info.name);
+    data.state   = playerlist::k_pszNames[static_cast<int>(playerlist::AccessData(info.friendsID).state)];
     snprintf(data.name, 31, "%s", info.name);
     return data;
 }
@@ -52,32 +51,32 @@ public:
         }
         else if (name == "player_disconnect")
         {
-            logging::Info("removePlayer %d", userid);
+            // logging::Info("removePlayer %d", userid);
             controller->removePlayer(userid);
         }
         else if (name == "player_team")
         {
-            logging::Info("updatePlayerTeam %d", userid);
+            // logging::Info("updatePlayerTeam %d", userid);
             controller->updatePlayerTeam(userid, event->GetInt("team") - 1);
         }
         else if (name == "player_changeclass")
         {
-            logging::Info("updatePlayerClass %d", userid);
+            // logging::Info("updatePlayerClass %d", userid);
             controller->updatePlayerClass(userid, event->GetInt("class"));
         }
         else if (name == "player_changename")
         {
-            logging::Info("updatePlayerName %d", userid);
+            // logging::Info("updatePlayerName %d", userid);
             controller->updatePlayerName(userid, event->GetString("newname"));
         }
         else if (name == "player_death")
         {
-            logging::Info("updatePlayerLifeState %d", userid);
+            // logging::Info("updatePlayerLifeState %d", userid);
             controller->updatePlayerLifeState(userid, true);
         }
         else if (name == "player_spawn")
         {
-            logging::Info("updatePlayerLifeState %d", userid);
+            // logging::Info("updatePlayerLifeState %d", userid);
             controller->updatePlayerLifeState(userid, false);
         }
     }
@@ -87,20 +86,22 @@ static PlayerListEventListener listener{};
 
 static void initPlayerlist()
 {
-    auto pl = dynamic_cast<zerokernel::Table *>(
-        zerokernel::Menu::instance->wm->getElementById("special-player-list"));
+    auto pl = dynamic_cast<zerokernel::Table *>(zerokernel::Menu::instance->wm->getElementById("special-player-list"));
     if (pl)
     {
-        controller =
-            std::make_unique<zerokernel::special::PlayerListController>(*pl);
-        controller->setKickButtonCallback([](int uid) {
-            hack::command_stack().push(format("callvote kick ", uid));
-        });
+        controller = std::make_unique<zerokernel::special::PlayerListController>(*pl);
+        controller->setKickButtonCallback([](int uid) { hack::command_stack().push(format("callvote kick ", uid)); });
         controller->setOpenSteamCallback([](unsigned steam) {
             CSteamID id{};
-            id.Set(steam, EUniverse::k_EUniversePublic,
-                   EAccountType::k_EAccountTypeIndividual);
+            id.Set(steam, EUniverse::k_EUniversePublic, EAccountType::k_EAccountTypeIndividual);
             g_ISteamFriends->ActivateGameOverlayToUser("steamid", id);
+        });
+        controller->setChangeStateCallback([](unsigned steam, int userid) {
+            auto &pl = playerlist::AccessData(steam);
+            pl.state = playerlist::k_EState((int) pl.state + 1);
+            if ((int) pl.state > (int) playerlist::k_EState::STATE_LAST)
+                pl.state = playerlist::k_EState(0);
+            controller->updatePlayerState(userid, playerlist::k_Names[(int) pl.state]);
         });
     }
     else
@@ -113,8 +114,7 @@ static void load()
 {
     zerokernel::Menu::instance->loadFromFile(DATA_PATH "/menu", "menu.xml");
 
-    zerokernel::Container *sv = dynamic_cast<zerokernel::Container *>(
-        zerokernel::Menu::instance->wm->getElementById("special-variables"));
+    zerokernel::Container *sv = dynamic_cast<zerokernel::Container *>(zerokernel::Menu::instance->wm->getElementById("special-variables"));
     if (sv)
     {
         zerokernel::special::SettingsManagerList list(*sv);
@@ -147,16 +147,29 @@ void gui::draw()
     zerokernel::Menu::instance->update();
     zerokernel::Menu::instance->render();
 }
-
+static Timer update_players{};
 bool gui::handleSdlEvent(SDL_Event *event)
 {
+    if (!zerokernel::Menu::instance)
+        return false;
+    if (controller && CE_GOOD(LOCAL_E) && update_players.test_and_set(10000))
+    {
+        controller->removeAll();
+        for (auto i = 1; i < 32; ++i)
+        {
+            player_info_s info{};
+            if (g_IEngine->GetPlayerInfo(i, &info))
+            {
+                controller->addPlayer(info.userID, createPlayerListData(info.userID));
+            }
+        }
+    }
     if (event->type == SDL_KEYDOWN)
     {
         if (event->key.keysym.scancode == (*open_gui_button).scan)
         {
-            logging::Info("GUI open button pressed");
-            zerokernel::Menu::instance->setInGame(
-                !zerokernel::Menu::instance->isInGame());
+            // logging::Info("GUI open button pressed");
+            zerokernel::Menu::instance->setInGame(!zerokernel::Menu::instance->isInGame());
             if (!zerokernel::Menu::instance->isInGame())
             {
                 g_ISurface->UnlockCursor();
@@ -170,8 +183,11 @@ bool gui::handleSdlEvent(SDL_Event *event)
             return true;
         }
     }
-    return zerokernel::Menu::instance->handleSdlEvent(event) &&
-           !zerokernel::Menu::instance->isInGame();
+    zerokernel::Menu::instance->handleSdlEvent(event);
+    if (!zerokernel::Menu::instance->isInGame() && (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_TEXTINPUT || event->type == SDL_KEYDOWN))
+        return true;
+    else
+        return false;
 }
 
 void gui::onLevelLoad()
@@ -184,8 +200,7 @@ void gui::onLevelLoad()
             player_info_s info{};
             if (g_IEngine->GetPlayerInfo(i, &info))
             {
-                controller->addPlayer(info.userID,
-                                      createPlayerListData(info.userID));
+                controller->addPlayer(info.userID, createPlayerListData(info.userID));
             }
         }
     }

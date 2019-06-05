@@ -2,7 +2,7 @@
   Created on 23.06.18.
 */
 
-#include <core/cvwrapper.hpp>
+#include "common.hpp"
 #include <unordered_map>
 #include <hoovy.hpp>
 #include <playerlist.hpp>
@@ -11,46 +11,35 @@
 #include "entitycache.hpp"
 #include "settings/Bool.hpp"
 
-static settings::Int betrayal_limit{ "player-tools.betrayal-limit", "true" };
-
-static settings::Bool taunting{ "player-tools.ignore.taunting", "true" };
-static settings::Bool hoovy{ "player-tools.ignore.hoovy", "true" };
-static settings::Bool ignoreCathook{ "player-tools.ignore.cathook", "true" };
-
-static settings::Bool online_notarget{ "player-tools.ignore.online.notarget",
-                                       "true" };
-static settings::Bool online_friendly_software{
-    "player-tools.ignore.online.friendly-software", "true"
-};
-static settings::Bool online_only_verified{
-    "player-tools.ignore.online.only-verified-accounts", "true"
-};
-static settings::Bool online_anonymous{ "player-tools.ignore.online.anonymous",
-                                        "true" };
-
-static std::unordered_map<unsigned, unsigned> betrayal_list{};
-
-static CatCommand forgive_all("pt_forgive_all", "Clear betrayal list",
-                              []() { betrayal_list.clear(); });
-
 namespace player_tools
 {
 
-IgnoreReason shouldTargetSteamId(unsigned id)
-{
-    if (id == 0)
-        return IgnoreReason::DO_NOT_IGNORE;
+static settings::Int betrayal_limit{ "player-tools.betrayal-limit", "2" };
 
+static settings::Boolean taunting{ "player-tools.ignore.taunting", "true" };
+static settings::Boolean hoovy{ "player-tools.ignore.hoovy", "true" };
+static settings::Boolean ignoreCathook{ "player-tools.ignore.cathook", "true" };
+
+static settings::Boolean online_notarget{ "player-tools.ignore.online.notarget", "true" };
+static settings::Boolean online_friendly_software{ "player-tools.ignore.online.friendly-software", "true" };
+static settings::Boolean online_only_verified{ "player-tools.ignore.online.only-verified-accounts", "true" };
+static settings::Boolean online_anonymous{ "player-tools.ignore.online.anonymous", "true" };
+
+static std::unordered_map<unsigned, unsigned> betrayal_list{};
+
+static CatCommand forgive_all("pt_forgive_all", "Clear betrayal list", []() { betrayal_list.clear(); });
+
+bool shouldTargetSteamId(unsigned id)
+{
     if (betrayal_limit)
     {
         if (betrayal_list[id] > int(betrayal_limit))
-            return IgnoreReason::DO_NOT_IGNORE;
+            return false;
     }
 
     auto &pl = playerlist::AccessData(id);
-    if (playerlist::IsFriendly(pl.state) ||
-        (pl.state == playerlist::k_EState::CAT && *ignoreCathook))
-        return IgnoreReason::LOCAL_PLAYER_LIST;
+    if (playerlist::IsFriendly(pl.state) || (pl.state == playerlist::k_EState::CAT && *ignoreCathook))
+        return false;
 #if ENABLE_ONLINE
     auto *co = online::getUserData(id);
     if (co)
@@ -61,30 +50,31 @@ IgnoreReason shouldTargetSteamId(unsigned id)
         if (check_verified && check_anonymous)
         {
             if (online_notarget && co->no_target)
-                return IgnoreReason::ONLINE_NO_TARGET;
+                return false;
             if (online_friendly_software && co->is_using_friendly_software)
-                return IgnoreReason::ONLINE_FRIENDLY_SOFTWARE;
+                return false;
         }
         // Always check developer status, no exceptions
         if (co->is_developer)
-            return IgnoreReason::DEVELOPER;
+            return false;
     }
 #endif
-    return IgnoreReason::DO_NOT_IGNORE;
+    return true;
 }
-IgnoreReason shouldTarget(CachedEntity *entity)
+bool shouldTarget(CachedEntity *entity)
 {
     if (entity->m_Type() == ENTITY_PLAYER)
     {
         if (hoovy && IsHoovy(entity))
-            return IgnoreReason::IS_HOOVY;
-        if (taunting && HasCondition<TFCond_Taunting>(entity))
-            return IgnoreReason::IS_TAUNTING;
-
+            return false;
+        if (taunting && HasCondition<TFCond_Taunting>(entity) && CE_INT(entity, netvar.m_iTauntIndex) == 3)
+            return false;
+        if (HasCondition<TFCond_HalloweenGhostMode>(entity))
+            return false;
         return shouldTargetSteamId(entity->player_info.friendsID);
     }
 
-    return IgnoreReason::DO_NOT_IGNORE;
+    return true;
 }
 
 bool shouldAlwaysRenderEspSteamId(unsigned id)
@@ -148,8 +138,7 @@ std::optional<colors::rgba_t> forceEspColor(CachedEntity *entity)
 
 void onKilledBy(unsigned id)
 {
-    auto reason = shouldTargetSteamId(id);
-    if (reason != IgnoreReason::DO_NOT_IGNORE)
+    if (!shouldTargetSteamId(id))
     {
         // We ignored the gamer, but they still shot us
         if (betrayal_list.find(id) == betrayal_list.end())

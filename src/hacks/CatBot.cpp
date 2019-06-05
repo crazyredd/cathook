@@ -6,34 +6,37 @@
  */
 
 #include <settings/Bool.hpp>
+#include "CatBot.hpp"
 #include "common.hpp"
 #include "hack.hpp"
 #include "PlayerTools.hpp"
-
-static settings::Bool enable{ "cat-bot.enable", "false" };
-static settings::Bool auto_disguise{ "misc.autodisguise", "true" };
-
-static settings::Int abandon_if_bots_gte{ "cat-bot.abandon-if.bots-gte", "0" };
-static settings::Int abandon_if_ipc_bots_gte{ "cat-bot.abandon-if.ipc-bots-gte",
-                                              "0" };
-static settings::Int abandon_if_humans_lte{ "cat-bot.abandon-if.humans-lte",
-                                            "0" };
-static settings::Int abandon_if_players_lte{ "cat-bot.abandon-if.players-lte",
-                                             "0" };
-static settings::Int mark_human_threshold{ "cat-bot.mark-human-after-kills",
-                                           "2" };
-
-static settings::Bool micspam{ "cat-bot.micspam.enable", "false" };
-static settings::Int micspam_on{ "cat-bot.micspam.interval-on", "3" };
-static settings::Int micspam_off{ "cat-bot.micspam.interval-off", "60" };
-
-static settings::Bool auto_crouch{ "cat-bot.auto-crouch", "true" };
-static settings::Bool always_crouch{ "cat-bot.always-crouch", "false" };
-static settings::Bool random_votekicks{ "cat-bot.votekicks", "false" };
-static settings::Bool autoReport{ "cat-bot.autoreport", "true" };
+#include "e8call.hpp"
+#include "NavBot.hpp"
+#include "navparser.hpp"
 
 namespace hacks::shared::catbot
 {
+static settings::Boolean auto_disguise{ "misc.autodisguise", "true" };
+
+static settings::Int abandon_if_bots_gte{ "cat-bot.abandon-if.bots-gte", "0" };
+static settings::Int abandon_if_ipc_bots_gte{ "cat-bot.abandon-if.ipc-bots-gte", "0" };
+static settings::Int abandon_if_humans_lte{ "cat-bot.abandon-if.humans-lte", "0" };
+static settings::Int abandon_if_players_lte{ "cat-bot.abandon-if.players-lte", "0" };
+static settings::Int mark_human_threshold{ "cat-bot.mark-human-after-kills", "2" };
+
+static settings::Boolean micspam{ "cat-bot.micspam.enable", "false" };
+static settings::Int micspam_on{ "cat-bot.micspam.interval-on", "3" };
+static settings::Int micspam_off{ "cat-bot.micspam.interval-off", "60" };
+
+static settings::Boolean auto_crouch{ "cat-bot.auto-crouch", "false" };
+static settings::Boolean always_crouch{ "cat-bot.always-crouch", "false" };
+static settings::Boolean random_votekicks{ "cat-bot.votekicks", "false" };
+static settings::Boolean autoReport{ "cat-bot.autoreport", "true" };
+
+static settings::Boolean mvm_autoupgrade{ "mvm.autoupgrade", "false" };
+
+settings::Boolean catbotmode{ "cat-bot.enable", "false" };
+settings::Boolean anti_motd{ "cat-bot.anti-motd", "false" };
 
 struct catbot_user_state
 {
@@ -73,9 +76,7 @@ void on_killed_by(int userid)
 
     // if (human_detecting_map[steamID].has_bot_name)
     human_detecting_map[steamID].treacherous_kills++;
-    logging::Info("Treacherous kill #%d: %s [U:1:%u]",
-                  human_detecting_map[steamID].treacherous_kills,
-                  player->player_info.name, player->player_info.friendsID);
+    logging::Info("Treacherous kill #%d: %s [U:1:%u]", human_detecting_map[steamID].treacherous_kills, player->player_info.name, player->player_info.friendsID);
 }
 
 void do_random_votekick()
@@ -83,13 +84,12 @@ void do_random_votekick()
     std::vector<int> targets;
     player_info_s local_info;
 
-    if (CE_BAD(LOCAL_E) ||
-        !g_IEngine->GetPlayerInfo(LOCAL_E->m_IDX, &local_info))
+    if (CE_BAD(LOCAL_E) || !g_IEngine->GetPlayerInfo(LOCAL_E->m_IDX, &local_info))
         return;
     for (int i = 1; i <= g_GlobalVars->maxClients; ++i)
     {
         player_info_s info;
-        if (!g_IEngine->GetPlayerInfo(i, &info))
+        if (!g_IEngine->GetPlayerInfo(i, &info) || !info.friendsID)
             continue;
         if (g_pPlayerResource->GetTeam(i) != g_pLocalPlayer->team)
             continue;
@@ -97,10 +97,8 @@ void do_random_votekick()
             continue;
         if (info.friendsID == local_info.friendsID)
             continue;
-        if (playerlist::AccessData(info.friendsID).state !=
-                playerlist::k_EState::RAGE &&
-            playerlist::AccessData(info.friendsID).state !=
-                playerlist::k_EState::DEFAULT)
+        auto &pl = playerlist::AccessData(info.friendsID);
+        if (pl.state != playerlist::k_EState::RAGE && pl.state != playerlist::k_EState::DEFAULT)
             continue;
 
         targets.push_back(info.userID);
@@ -113,10 +111,9 @@ void do_random_votekick()
     player_info_s info;
     if (!g_IEngine->GetPlayerInfo(g_IEngine->GetPlayerForUserID(target), &info))
         return;
-    hack::ExecuteCommand("callvote kick " + std::to_string(target) +
-                         " cheating");
+    hack::ExecuteCommand("callvote kick \"" + std::to_string(target) + " cheating\"");
 }
-
+static const std::string catbot_names[] = { "K4T-B0T", "cat-", "btarrant", "just disable vac tf", "raul.garcia", "zCat", "lagger bot" };
 void update_catbot_list()
 {
     for (int i = 1; i < g_GlobalVars->maxClients; ++i)
@@ -125,25 +122,280 @@ void update_catbot_list()
         if (!g_IEngine->GetPlayerInfo(i, &info))
             continue;
 
+        if (!info.friendsID || player_tools::shouldTargetSteamId(info.friendsID))
+            continue;
         info.name[31] = 0;
-        if (strcasestr(info.name, "cat-bot") ||
-            strcasestr(info.name, "just disable vac tf") ||
-            strcasestr(info.name, "raul.garcia") ||
-            strcasestr(info.name, "zCat") ||
-            strcasestr(info.name, "lagger bot") ||
-            strcasestr(info.name, "zLag-bot") ||
-            strcasestr(info.name, "crash-bot") ||
-            strcasestr(info.name, "reichstagbot"))
-        {
-            if (human_detecting_map.find(info.friendsID) ==
-                human_detecting_map.end())
+        std::string pl_name(info.name);
+        for (auto name : catbot_names)
+            if (pl_name.find(name) != pl_name.npos)
             {
-                logging::Info("Found bot %s [U:1:%u]", info.name,
-                              info.friendsID);
-                human_detecting_map.insert(
-                    std::make_pair(info.friendsID, catbot_user_state{ 0 }));
+                if (human_detecting_map.find(info.friendsID) == human_detecting_map.end())
+                {
+                    logging::Info("Found bot %s [U:1:%u]", info.name, info.friendsID);
+                    human_detecting_map.insert(std::make_pair(info.friendsID, catbot_user_state{ 0 }));
+                }
             }
+    }
+}
+
+// Get Muh money
+int GetMvmCredits()
+{
+    if (CE_GOOD(LOCAL_E))
+        return NET_INT(RAW_ENT(LOCAL_E), 0x2f50);
+    return 0;
+}
+
+static CatCommand debug_money("debug_mvmmoney", "Print MVM Money", []() { logging::Info("%d", GetMvmCredits()); });
+// Store information
+struct Posinfo
+{
+    float x;
+    float y;
+    float z;
+    std::string lvlname;
+    Posinfo(float _x, float _y, float _z, std::string _lvlname)
+    {
+        x       = _x;
+        y       = _y;
+        z       = _z;
+        lvlname = _lvlname;
+    }
+    Posinfo(){};
+};
+struct Upgradeinfo
+{
+    int id;
+    int cost;
+    int clazz;
+    // Higher = better
+    int priority;
+    int priority_falloff;
+    Upgradeinfo(){};
+    Upgradeinfo(int _id, int _cost, int _clazz, int _priority, int _priority_falloff)
+    {
+        id               = _id;
+        cost             = _cost;
+        clazz            = _clazz;
+        priority         = _priority;
+        priority_falloff = _priority_falloff;
+    }
+};
+static std::vector<Upgradeinfo> upgrade_list;
+
+static bool inited_upgrades = false;
+// Pick a upgrade
+Upgradeinfo PickUpgrade()
+{
+    if (!inited_upgrades)
+    {
+        // Damage ( Important )
+        upgrade_list.push_back({ 0, 400, tf_sniper, 4, 1 });
+        // Projectile Penetration ( Good )
+        upgrade_list.push_back({ 12, 400, tf_sniper, 5, 500 });
+        // Explosive Headshot
+        upgrade_list.push_back({ 40, 350, tf_sniper, 6, 2 });
+        // +50% Ammo ( Basically least valuable upgrade for primary )
+        upgrade_list.push_back({ 6, 250, tf_sniper, 3, 1 });
+        // +20% Reload Speed ( Pretty important )
+        upgrade_list.push_back({ 35, 250, tf_sniper, 6, 1 });
+        // +25 Health on kill ( It's meh yet you need it to not die )
+        upgrade_list.push_back({ 11, 200, tf_sniper, 3, 2 });
+        // +25% Faster charge ( Good for "Wait for charge" catbots )
+        upgrade_list.push_back({ 17, 200, tf_sniper, 4, 1 });
+        inited_upgrades = true;
+    }
+    int highest_priority = INT_MIN;
+    std::vector<Upgradeinfo *> potential_upgrades;
+    for (auto &i : upgrade_list)
+    {
+        // Don't want wrong class
+        if (i.clazz != g_pLocalPlayer->clazz)
+            continue;
+        // Can't buy something we can't afford lol
+        if (i.cost > GetMvmCredits())
+            continue;
+        // Not a Priority right now
+        if (i.priority < highest_priority)
+            continue;
+        // Clear out everything incase a higher priority is found
+        if (i.priority > highest_priority)
+            potential_upgrades.clear();
+        highest_priority = i.priority;
+        potential_upgrades.push_back(&i);
+    }
+    int vec_size = potential_upgrades.size();
+    if (!vec_size)
+        return { -1, -1, -1, -1, -1 };
+    else
+    {
+        auto choosen_element = potential_upgrades[rand() % vec_size];
+        // Less important after an upgrade
+        choosen_element->priority -= choosen_element->priority_falloff;
+        return *choosen_element;
+    }
+}
+static std::vector<Posinfo> spot_list;
+// Upgrade Navigation
+void NavUpgrade()
+{
+    std::string lvlname = g_IEngine->GetLevelName();
+    std::vector<Posinfo> potential_spots{};
+
+    for (auto &i : spot_list)
+    {
+        if (lvlname.find(i.lvlname) != lvlname.npos)
+            potential_spots.push_back({ i.x, i.y, i.z, lvlname });
+    }
+    Posinfo best_spot{};
+    float best_score = FLT_MAX;
+    for (auto &i : potential_spots)
+    {
+        Vector pos  = { i.x, i.y, 0.0f };
+        float score = pos.DistTo(LOCAL_E->m_vecOrigin());
+        if (score < best_score)
+        {
+            best_spot  = i;
+            best_score = score;
         }
+    }
+    Posinfo to_path                        = best_spot;
+    hacks::tf2::NavBot::task::current_task = hacks::tf2::NavBot::task::outofbounds;
+    bool success                           = nav::navTo(Vector{ to_path.x, to_path.y, to_path.z }, 8, true, true);
+    if (!success)
+    {
+        logging::Info("No valid spots found!");
+        hacks::tf2::NavBot::task::current_task = hacks::tf2::NavBot::task::none;
+        return;
+    }
+}
+static bool run = false;
+static Timer run_delay;
+static Timer buy_upgrade;
+static InitRoutine init_routine([]() {
+    EC::Register(
+        EC::Paint,
+        []() {
+            if (run && run_delay.test_and_set(200))
+            {
+                run                = false;
+                auto upgrade_panel = g_CHUD->FindElement("CHudUpgradePanel");
+                typedef int (*CancelUpgrade_t)(CHudElement *);
+                static uintptr_t addr = (unsigned) e8call((void *) (gSignatures.GetClientSignature("E8 ? ? ? ? 8B 3D ? ? ? ? 8D 4B 28 ") + 1));
+                if (upgrade_panel)
+                {
+                    static CancelUpgrade_t CancelUpgrade_fn = CancelUpgrade_t(addr);
+                    CancelUpgrade_fn(upgrade_panel);
+                }
+            }
+        },
+        "mvmupgrade_paint");
+    EC::Register(
+        EC::CreateMove,
+        []() {
+            if (!*mvm_autoupgrade)
+                return;
+            std::string lvlname = g_IEngine->GetLevelName();
+            if (lvlname.find("mvm_") == lvlname.npos)
+                return;
+            if (hacks::tf2::NavBot::task::current_task == hacks::tf2::NavBot::task::outofbounds)
+            {
+                if (nav::ReadyForCommands)
+                    hacks::tf2::NavBot::task::current_task = hacks::tf2::NavBot::task::none;
+                else
+                    return;
+            }
+            if (GetMvmCredits() <= 250)
+                return;
+            if (CE_BAD(LOCAL_E))
+                return;
+            if (!buy_upgrade.check(5000))
+                return;
+            std::vector<Posinfo> potential_spots{};
+
+            for (auto &i : spot_list)
+            {
+                if (lvlname.find(i.lvlname) != lvlname.npos)
+                    potential_spots.push_back({ i.x, i.y, i.z, lvlname });
+            }
+            Posinfo best_spot{};
+            float best_score = FLT_MAX;
+            for (auto &i : potential_spots)
+            {
+                Vector pos  = { i.x, i.y, 0.0f };
+                float score = pos.DistTo(LOCAL_E->m_vecOrigin());
+                if (score < best_score)
+                {
+                    best_spot  = i;
+                    best_score = score;
+                }
+            }
+            if (GetMvmCredits() >= 400 || Vector{ best_spot.x, best_spot.y, best_spot.z }.DistTo(LOCAL_E->m_vecOrigin()) <= 500.0f)
+            {
+                NavUpgrade();
+                buy_upgrade.update();
+            }
+        },
+        "mvm_upgrade_createmove");
+    EC::Register(
+        EC::LevelShutdown, []() { inited_upgrades = false; }, "mvmupgrades_levelshutdown");
+    spot_list.push_back(Posinfo(851.0f, -2509.0f, 577.0f, "mvm_coaltown"));
+    spot_list.push_back(Posinfo(935.0f, -2626.0f, 577.0f, "mvm_bigrock"));
+    spot_list.push_back(Posinfo(-885, -2229, 545, "mvm_decoy"));
+    spot_list.push_back(Posinfo(851, -2509, 577, "mvm_ghost_town"));
+    spot_list.push_back(Posinfo(-625, 2273, -95, "mvm_mannhatten"));
+    spot_list.push_back(Posinfo(517, -2599, 450, "mvm_mannworks"));
+    spot_list.push_back(Posinfo(-1346, 625, -102, "mvm_rottenburg"));
+});
+
+void MvM_Autoupgrade(KeyValues *event)
+{
+    if (!isHackActive())
+        return;
+    if (!*mvm_autoupgrade)
+        return;
+    std::string name = std::string(event->GetName());
+    if (!name.compare("MVM_Upgrade"))
+    {
+        KeyValues *new_key = new KeyValues("upgrade");
+        KeyValues *key     = event->FindKey("upgrade", false);
+        if (!key)
+        {
+            new_key->SetInt("itemslot", 0);
+            new_key->SetInt("upgrade", 0);
+            new_key->SetInt("count", 1);
+            event->AddSubKey(new_key);
+            key = event->FindKey("upgrade", false);
+        }
+        else
+            delete new_key;
+        if (key)
+        {
+
+            auto upgrade = PickUpgrade();
+            if (upgrade.id == -1)
+                return;
+            key->SetInt("itemslot", 0);
+            key->SetInt("upgrade", upgrade.id);
+            key->SetInt("count", 1);
+        }
+        else
+            logging::Info("Key process failed!");
+    }
+    if (!name.compare("MvM_UpgradesBegin"))
+    {
+        logging::Info("Sent Upgrades");
+        run = true;
+        run_delay.update();
+    }
+}
+
+void SendNetMsg(INetMessage &msg)
+{
+    if (!strcmp(msg.GetName(), "clc_CmdKeyValues"))
+    {
+        if ((KeyValues *) (((unsigned *) &msg)[4]))
+            MvM_Autoupgrade((KeyValues *) (((unsigned *) &msg)[4]));
     }
 }
 
@@ -151,11 +403,10 @@ class CatBotEventListener : public IGameEventListener2
 {
     void FireGameEvent(IGameEvent *event) override
     {
-        if (!enable)
+        if (!catbotmode)
             return;
 
-        int killer_id =
-            g_IEngine->GetPlayerForUserID(event->GetInt("attacker"));
+        int killer_id = g_IEngine->GetPlayerForUserID(event->GetInt("attacker"));
         int victim_id = g_IEngine->GetPlayerForUserID(event->GetInt("userid"));
 
         if (victim_id == g_IEngine->GetLocalPlayer())
@@ -197,48 +448,75 @@ Timer level_init_timer{};
 
 Timer micspam_on_timer{};
 Timer micspam_off_timer{};
-
+static bool patched_report;
+static std::atomic_bool can_report = false;
+static std::vector<unsigned> to_report;
 void reportall()
 {
-    typedef uint64_t (*ReportPlayer_t)(uint64_t, int);
-    static uintptr_t addr2 = gSignatures.GetClientSignature(
-        "55 89 E5 57 56 53 81 EC ? ? ? ? 8B 5D ? 8B 7D ? 89 D8");
-    ReportPlayer_t ReportPlayer_fn = ReportPlayer_t(addr2);
-    if (!addr2)
-        return;
-    player_info_s local;
-    g_IEngine->GetPlayerInfo(g_pLocalPlayer->entity_idx, &local);
-    for (int i = 1; i < g_IEngine->GetMaxClients(); i++)
+    can_report = false;
+    if (!patched_report)
+    {
+        static BytePatch patch(gSignatures.GetClientSignature, "73 ? 80 7D ? ? 74 ? F3 0F 10 0D", 0x2F, { 0x89, 0xe0 });
+        patch.Patch();
+        patched_report = true;
+    }
+    for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
     {
         CachedEntity *ent = ENTITY(i);
         // We only want a nullptr check since dormant entities are still on the
         // server
         if (!ent)
             continue;
+
+        // Pointer comparison is fine
         if (ent == LOCAL_E)
             continue;
         player_info_s info;
-        if (g_IEngine->GetPlayerInfo(i, &info))
+        if (g_IEngine->GetPlayerInfo(i, &info) && info.friendsID)
         {
-            //            if (info.friendsID == local.friendsID ||
-            //                playerlist::AccessData(info.friendsID).state ==
-            //                    playerlist::k_EState::FRIEND ||
-            //                playerlist::AccessData(info.friendsID).state ==
-            //                    playerlist::k_EState::IPC)
-            //                continue;
-            if (player_tools::shouldTargetSteamId(info.friendsID) !=
-                player_tools::IgnoreReason::DO_NOT_IGNORE)
+            if (!player_tools::shouldTargetSteamId(info.friendsID))
                 continue;
-            CSteamID id(info.friendsID, EUniverse::k_EUniversePublic,
-                        EAccountType::k_EAccountTypeIndividual);
-            ReportPlayer_fn(id.ConvertToUint64(), 1);
+            to_report.push_back(info.friendsID);
         }
     }
+    can_report = true;
 }
-CatCommand report("report_debug", "debug", []() { reportall(); });
+
+CatCommand report("report_all", "Report all players", []() { reportall(); });
+CatCommand report_uid("report_steamid", "Report with steamid", [](const CCommand &args) {
+    if (args.ArgC() < 1)
+        return;
+    unsigned steamid = 0;
+    try
+    {
+        steamid = std::stoi(args.Arg(1));
+    }
+    catch (std::invalid_argument)
+    {
+        logging::Info("Report machine broke");
+        return;
+    }
+    if (!steamid)
+    {
+        logging::Info("Report machine broke");
+        return;
+    }
+    typedef uint64_t (*ReportPlayer_t)(uint64_t, int);
+    static uintptr_t addr1                = gSignatures.GetClientSignature("55 89 E5 57 56 53 81 EC ? ? ? ? 8B 5D ? 8B 7D ? 89 D8");
+    static ReportPlayer_t ReportPlayer_fn = ReportPlayer_t(addr1);
+    if (!addr1)
+        return;
+    CSteamID id(steamid, EUniverse::k_EUniversePublic, EAccountType::k_EAccountTypeIndividual);
+    ReportPlayer_fn(id.ConvertToUint64(), 1);
+});
+
 Timer crouchcdr{};
 void smart_crouch()
 {
+    if (g_Settings.bInvalid)
+        return;
+    if (!current_user_cmd)
+        return;
     if (*always_crouch)
     {
         current_user_cmd->buttons |= IN_DUCK;
@@ -250,20 +528,14 @@ void smart_crouch()
     static bool crouch = false;
     if (crouchcdr.test_and_set(2000))
     {
-        for (int i = 0; i < g_IEngine->GetMaxClients(); i++)
+        for (int i = 0; i <= g_IEngine->GetMaxClients(); i++)
         {
             auto ent = ENTITY(i);
-            if (CE_BAD(ent) || ent->m_Type() != ENTITY_PLAYER ||
-                ent->m_iTeam() == LOCAL_E->m_iTeam() ||
-                !(ent->hitboxes.GetHitbox(0)) || !(ent->m_bAlivePlayer()) ||
-                player_tools::shouldTargetSteamId(ent->player_info.friendsID) !=
-                    player_tools::IgnoreReason::DO_NOT_IGNORE ||
-                should_ignore_player(ent))
+            if (CE_BAD(ent) || ent->m_Type() != ENTITY_PLAYER || ent->m_iTeam() == LOCAL_E->m_iTeam() || !(ent->hitboxes.GetHitbox(0)) || !(ent->m_bAlivePlayer()) || !player_tools::shouldTarget(ent) || should_ignore_player(ent))
                 continue;
             bool failedvis = false;
             for (int j = 0; j < 18; j++)
-                if (IsVectorVisible(g_pLocalPlayer->v_Eye,
-                                    ent->hitboxes.GetHitbox(j)->center))
+                if (IsVectorVisible(g_pLocalPlayer->v_Eye, ent->hitboxes.GetHitbox(j)->center))
                     failedvis = true;
             if (failedvis)
                 continue;
@@ -272,12 +544,7 @@ void smart_crouch()
                 if (!LOCAL_E->hitboxes.GetHitbox(j))
                     continue;
                 // Check if they see my hitboxes
-                if (!IsVectorVisible(ent->hitboxes.GetHitbox(0)->center,
-                                     LOCAL_E->hitboxes.GetHitbox(j)->center) &&
-                    !IsVectorVisible(ent->hitboxes.GetHitbox(0)->center,
-                                     LOCAL_E->hitboxes.GetHitbox(j)->min) &&
-                    !IsVectorVisible(ent->hitboxes.GetHitbox(0)->center,
-                                     LOCAL_E->hitboxes.GetHitbox(j)->max))
+                if (!IsVectorVisible(ent->hitboxes.GetHitbox(0)->center, LOCAL_E->hitboxes.GetHitbox(j)->center) && !IsVectorVisible(ent->hitboxes.GetHitbox(0)->center, LOCAL_E->hitboxes.GetHitbox(j)->min) && !IsVectorVisible(ent->hitboxes.GetHitbox(0)->center, LOCAL_E->hitboxes.GetHitbox(j)->max))
                     continue;
                 foundtar = true;
                 crouch   = true;
@@ -290,17 +557,45 @@ void smart_crouch()
         current_user_cmd->buttons |= IN_DUCK;
 }
 
+CatCommand print_ammo("debug_print_ammo", "debug", []() {
+    if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer() || CE_BAD(LOCAL_W))
+        return;
+    logging::Info("Current slot: %d", re::C_BaseCombatWeapon::GetSlot(RAW_ENT(LOCAL_W)));
+    for (int i = 0; i < 10; i++)
+        logging::Info("Ammo Table %d: %d", i, CE_INT(LOCAL_E, netvar.m_iAmmo + i * 4));
+});
 static Timer disguise{};
 static Timer report_timer{};
+static std::string health = "Health: 0/0";
+static std::string ammo   = "Ammo: 0/0";
+static int max_ammo;
+static CachedEntity *local_w;
 // TODO: add more stuffs
-static HookedFunction cm(HF_CreateMove, "catbot", 5, []() {
-    if (!*enable)
+static void cm()
+{
+    if (!*catbotmode)
         return;
 
+    if (CE_GOOD(LOCAL_E))
+    {
+        if (LOCAL_W != local_w)
+        {
+            local_w  = LOCAL_W;
+            max_ammo = 0;
+        }
+        float max_hp  = g_pPlayerResource->GetMaxHealth(LOCAL_E);
+        float curr_hp = CE_INT(LOCAL_E, netvar.iHealth);
+        int ammo0     = CE_INT(LOCAL_E, netvar.m_iClip2);
+        int ammo2     = CE_INT(LOCAL_E, netvar.m_iClip1);
+        if (ammo0 + ammo2 > max_ammo)
+            max_ammo = ammo0 + ammo2;
+        health = format("Health: ", curr_hp, "/", max_hp);
+        ammo   = format("Ammo: ", ammo0 + ammo2, "/", max_ammo);
+    }
     if (g_Settings.bInvalid)
         return;
 
-    if (CE_BAD(LOCAL_E))
+    if (CE_BAD(LOCAL_E) || CE_BAD(LOCAL_W))
         return;
 
     if (*auto_crouch)
@@ -308,36 +603,60 @@ static HookedFunction cm(HF_CreateMove, "catbot", 5, []() {
 
     //
     static const int classes[3]{ tf_spy, tf_sniper, tf_pyro };
-    if (*auto_disguise && g_pPlayerResource->GetClass(LOCAL_E) == tf_spy &&
-        !HasCondition<TFCond_Disguised>(LOCAL_E) && disguise.test_and_set(3000))
+    if (*auto_disguise && g_pPlayerResource->GetClass(LOCAL_E) == tf_spy && !IsPlayerDisguised(LOCAL_E) && disguise.test_and_set(3000))
     {
-        int teamtodisguise =
-            (LOCAL_E->m_iTeam() == TEAM_RED) ? TEAM_BLU : TEAM_RED;
-        int classtojoin = classes[rand() % 3];
-        g_IEngine->ClientCmd_Unrestricted(
-            format("disguise ", classtojoin, " ", teamtodisguise).c_str());
+        int teamtodisguise = (LOCAL_E->m_iTeam() == TEAM_RED) ? TEAM_RED - 1 : TEAM_BLU - 1;
+        int classtojoin    = classes[rand() % 3];
+        g_IEngine->ClientCmd_Unrestricted(format("disguise ", classtojoin, " ", teamtodisguise).c_str());
     }
     if (*autoReport && report_timer.test_and_set(60000))
         reportall();
-});
+}
 
+static Timer autojointeam{};
+static Timer report_timer2{};
 void update()
 {
-    if (!enable)
+    if (g_Settings.bInvalid)
         return;
 
-    if (g_Settings.bInvalid)
+    if (can_report)
+    {
+        typedef uint64_t (*ReportPlayer_t)(uint64_t, int);
+        static uintptr_t addr1                = gSignatures.GetClientSignature("55 89 E5 57 56 53 81 EC ? ? ? ? 8B 5D ? 8B 7D ? 89 D8");
+        static ReportPlayer_t ReportPlayer_fn = ReportPlayer_t(addr1);
+        if (!addr1)
+            return;
+        if (report_timer2.test_and_set(400))
+        {
+            if (to_report.empty())
+                can_report = false;
+            else
+            {
+                auto rep = to_report.back();
+                to_report.pop_back();
+                CSteamID id(rep, EUniverse::k_EUniversePublic, EAccountType::k_EAccountTypeIndividual);
+                ReportPlayer_fn(id.ConvertToUint64(), 1);
+            }
+        }
+    }
+    if (!catbotmode)
         return;
 
     if (CE_BAD(LOCAL_E))
         return;
 
+    if (LOCAL_E->m_bAlivePlayer())
+        autojointeam.update();
+    if (autojointeam.test_and_set(60000) && !LOCAL_E->m_bAlivePlayer())
+        hack::command_stack().push("autoteam; join_class sniper");
+
     if (micspam)
     {
         if (micspam_on && micspam_on_timer.test_and_set(*micspam_on * 1000))
-            g_IEngine->ExecuteClientCmd("+voicerecord");
+            g_IEngine->ClientCmd_Unrestricted("+voicerecord");
         if (micspam_off && micspam_off_timer.test_and_set(*micspam_off * 1000))
-            g_IEngine->ExecuteClientCmd("-voicerecord");
+            g_IEngine->ClientCmd_Unrestricted("-voicerecord");
     }
 
     if (random_votekicks && timer_votekicks.test_and_set(5000))
@@ -364,8 +683,7 @@ void update()
             if (is_a_catbot(info.friendsID))
                 ++count_bots;
 
-            if (playerlist::AccessData(info.friendsID).state ==
-                playerlist::k_EState::IPC)
+            if (playerlist::AccessData(info.friendsID).state == playerlist::k_EState::IPC)
                 ++count_ipc;
         }
 
@@ -397,8 +715,7 @@ void update()
             {
                 logging::Info("Abandoning because there are %d non-bots in "
                               "game, and abandon_if_humans_lte is %d.",
-                              count_total - count_bots,
-                              int(abandon_if_humans_lte));
+                              count_total - count_bots, int(abandon_if_humans_lte));
                 tfmm::abandon();
                 return;
             }
@@ -426,4 +743,26 @@ void level_init()
 {
     level_init_timer.update();
 }
+
+#if ENABLE_VISUALS
+static void draw()
+{
+    if (!catbotmode || !anti_motd)
+        return;
+    if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer())
+        return;
+    AddCenterString(health, colors::green);
+    AddCenterString(ammo, colors::yellow);
+}
+#endif
+
+static InitRoutine runinit([]() {
+    EC::Register(EC::CreateMove, cm, "cm_catbot", EC::average);
+    EC::Register(EC::CreateMove, update, "cm2_catbot", EC::average);
+    EC::Register(EC::LevelInit, level_init, "levelinit_catbot", EC::average);
+#if ENABLE_VISUALS
+    EC::Register(EC::Draw, draw, "draw_catbot", EC::average);
+#endif
+    init();
+});
 } // namespace hacks::shared::catbot

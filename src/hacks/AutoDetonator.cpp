@@ -9,11 +9,10 @@
 #include <settings/Bool.hpp>
 #include "common.hpp"
 
-static settings::Bool enable{ "auto-detonator.enable", "0" };
-static settings::Bool legit{ "auto-detonator.ignore-cloaked", "0" };
-
 namespace hacks::tf::autodetonator
 {
+static settings::Boolean enable{ "auto-detonator.enable", "0" };
+static settings::Boolean legit{ "auto-detonator.ignore-cloaked", "0" };
 
 // A storage array for ents
 std::vector<CachedEntity *> flares;
@@ -53,8 +52,7 @@ bool IsTarget(CachedEntity *ent)
             return false;
 
         // Global checks
-        if (player_tools::shouldTarget(ent) !=
-            player_tools::IgnoreReason::DO_NOT_IGNORE)
+        if (!player_tools::shouldTarget(ent))
             return false;
         IF_GAME(IsTF())
         {
@@ -77,12 +75,9 @@ bool IsTarget(CachedEntity *ent)
 // Function called by game for movement
 void CreateMove()
 {
-    // Check user settings if auto detonator is enabled
-    if (!enable)
-        return;
-
-    // Check if player is pyro
-    if (g_pLocalPlayer->clazz != tf_pyro)
+    // Check if it enabled in settings, weapon entity exists and current
+    // class is pyro
+    if (!enable || CE_BAD(LOCAL_W) || g_pLocalPlayer->clazz != tf_pyro)
         return;
 
     // Clear the arrays
@@ -130,4 +125,6 @@ void CreateMove()
     // End of function, just return
     return;
 }
+
+static InitRoutine EC([]() { EC::Register(EC::CreateMove, CreateMove, "auto_detonator", EC::average); });
 } // namespace hacks::tf::autodetonator

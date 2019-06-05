@@ -1,5 +1,4 @@
-target_sources(cathook PRIVATE
-        "${CMAKE_CURRENT_LIST_DIR}/angles.cpp"
+set(files "${CMAKE_CURRENT_LIST_DIR}/angles.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/chatlog.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/chatstack.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/conditions.cpp"
@@ -21,6 +20,7 @@ target_sources(cathook PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/prediction.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/projlogging.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/sconvars.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/soundcache.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/targethelper.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/textfile.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/textmode.cpp"
@@ -35,6 +35,9 @@ target_sources(cathook PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/irc.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/PlayerTools.cpp")
 
+target_sources(cathook PRIVATE ${files})
+list(REMOVE_ITEM ignore_files ${files})
+set(ignore_files ${ignore_files} CACHE INTERNAL "")
 add_subdirectory(core)
 add_subdirectory(classinfo)
 add_subdirectory(copypasted)

@@ -13,13 +13,12 @@
 #include "PlayerTools.hpp"
 #include "hack.hpp"
 
-static settings::Bool enable{ "find-cheaters.enable", "0" };
-static settings::Bool accuse_chat{ "find-cheaters.accuse-in-chat", "0" };
-static settings::Bool autorage{ "find-cheaters.auto-rage", "0" };
-static settings::Bool skip_local{ "find-cheaters.ignore-local", "1" };
-
 namespace hacks::shared::anticheat
 {
+static settings::Boolean enable{ "find-cheaters.enable", "0" };
+static settings::Boolean accuse_chat{ "find-cheaters.accuse-in-chat", "0" };
+static settings::Boolean autorage{ "find-cheaters.auto-rage", "0" };
+static settings::Boolean skip_local{ "find-cheaters.ignore-local", "1" };
 
 void Accuse(int eid, const std::string &hack, const std::string &details)
 {
@@ -29,18 +28,12 @@ void Accuse(int eid, const std::string &hack, const std::string &details)
         CachedEntity *ent = ENTITY(eid);
         if (accuse_chat)
         {
-            hack::command_stack().push(
-                format("say \"", info.name, " (",
-                       classname(CE_INT(ent, netvar.iClass)), ") suspected ",
-                       hack, ": ", details, "\""));
+            hack::command_stack().push(format("say \"", info.name, " (", classname(CE_INT(ent, netvar.iClass)), ") suspected ", hack, ": ", details, "\""));
         }
         else
         {
 #if ENABLE_VISUALS
-            PrintChat("\x07%06X%s\x01 (%s) suspected \x07%06X%s\x01: %s",
-                      colors::chat::team(ENTITY(eid)->m_iTeam()), info.name,
-                      classname(CE_INT(ent, netvar.iClass)), 0xe05938,
-                      hack.c_str(), details.c_str());
+            PrintChat("\x07%06X%s\x01 (%s) suspected \x07%06X%s\x01: %s", colors::chat::team(ENTITY(eid)->m_iTeam()), info.name, classname(CE_INT(ent, netvar.iClass)), 0xe05938, hack.c_str(), details.c_str());
 #endif
         }
     }
@@ -49,8 +42,7 @@ void Accuse(int eid, const std::string &hack, const std::string &details)
 void SetRage(player_info_t info)
 {
     if (autorage)
-        playerlist::AccessData(info.friendsID).state =
-            playerlist::k_EState::RAGE;
+        playerlist::AccessData(info.friendsID).state = playerlist::k_EState::RAGE;
 }
 
 void CreateMove()
@@ -59,7 +51,7 @@ void CreateMove()
         return;
     angles::Update();
     ac::aimbot::player_orgs().clear();
-    for (int i = 1; i < g_IEngine->GetMaxClients(); i++)
+    for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
     {
         if (skip_local && (i == g_IEngine->GetLocalPlayer()))
             continue;
@@ -68,9 +60,7 @@ void CreateMove()
         {
             if (ent->m_bAlivePlayer())
             {
-                if (player_tools::shouldTarget(ent) ==
-                        player_tools::IgnoreReason::DO_NOT_IGNORE ||
-                    ent == LOCAL_E)
+                if (player_tools::shouldTarget(ent) || ent == LOCAL_E)
                 {
                     ac::aimbot::Update(ent);
                     ac::antiaim::Update(ent);
@@ -127,4 +117,11 @@ void Init()
     // FIXME free listener
     g_IGameEventManager->AddListener(&listener, false);
 }
+
+static InitRoutine EC([]() {
+    EC::Register(EC::CreateMove, CreateMove, "cm_AntiCheat", EC::average);
+    EC::Register(EC::LevelInit, ResetEverything, "init_AntiCheat", EC::average);
+    EC::Register(EC::LevelShutdown, ResetEverything, "reset_AntiCheat", EC::average);
+    Init();
+});
 } // namespace hacks::shared::anticheat

@@ -6,9 +6,10 @@
  */
 
 #pragma once
-
-#include <glez/color.hpp>
 #include "config.h"
+#if !ENABLE_ENGINE_DRAWING && !ENABLE_IMGUI_DRAWING
+#include "glez/color.hpp"
+#endif
 
 class CachedEntity;
 #if ENABLE_VISUALS
@@ -46,10 +47,14 @@ struct rgba_t
     };
 
     constexpr rgba_t() : r(0.0f), g(0.0f), b(0.0f), a(0.0f){};
-    constexpr rgba_t(float _r, float _g, float _b, float _a = 1.0f)
-        : r(_r), g(_g), b(_b), a(_a){};
+    constexpr rgba_t(float _r, float _g, float _b, float _a = 1.0f) : r(_r), g(_g), b(_b), a(_a){};
 
     explicit rgba_t(const char hex[6]);
+#if !ENABLE_ENGINE_DRAWING && !ENABLE_IMGUI_DRAWING
+    constexpr rgba_t(const glez::rgba &other) : r(other.r), g(other.g), b(other.b), a(other.a){};
+#endif
+
+#if !ENABLE_ENGINE_DRAWING && !ENABLE_IMGUI_DRAWING
 #if __clang__
     operator glez::rgba() const
     {
@@ -60,6 +65,7 @@ struct rgba_t
     {
         return *reinterpret_cast<const glez::rgba *>(this);
     }
+#endif
 #endif
 
     constexpr operator bool() const
@@ -110,14 +116,10 @@ constexpr rgba_t black(0, 0, 0, 1);
 
 constexpr rgba_t pink = FromRGBA8(255, 105, 180, 255);
 
-constexpr rgba_t red    = FromRGBA8(237, 42, 42, 255),
-                 blu    = FromRGBA8(28, 108, 237, 255);
-constexpr rgba_t red_b  = FromRGBA8(64, 32, 32, 178),
-                 blu_b  = FromRGBA8(32, 32, 64, 178); // Background
-constexpr rgba_t red_v  = FromRGBA8(196, 102, 108, 255),
-                 blu_v  = FromRGBA8(102, 182, 196, 255); // Vaccinator
-constexpr rgba_t red_u  = FromRGBA8(216, 34, 186, 255),
-                 blu_u  = FromRGBA8(167, 75, 252, 255); // Ubercharged
+constexpr rgba_t red = FromRGBA8(237, 42, 42, 255), blu = FromRGBA8(28, 108, 237, 255);
+constexpr rgba_t red_b = FromRGBA8(64, 32, 32, 178), blu_b = FromRGBA8(32, 32, 64, 178);       // Background
+constexpr rgba_t red_v = FromRGBA8(196, 102, 108, 255), blu_v = FromRGBA8(102, 182, 196, 255); // Vaccinator
+constexpr rgba_t red_u = FromRGBA8(216, 34, 186, 255), blu_u = FromRGBA8(167, 75, 252, 255);   // Ubercharged
 constexpr rgba_t yellow = FromRGBA8(255, 255, 0, 255);
 constexpr rgba_t orange = FromRGBA8(255, 120, 0, 255);
 constexpr rgba_t green  = FromRGBA8(0, 255, 0, 255);
@@ -156,6 +158,7 @@ constexpr rgba_t FromHSL(float h, float s, float v)
         return rgba_t{ v, p, q, 1.0f };
     }
 }
+// Made more readable for future reference
 constexpr rgba_t Health(int health, int max)
 {
     float hf = float(health) / float(max);
@@ -163,8 +166,44 @@ constexpr rgba_t Health(int health, int max)
     {
         return colors::FromRGBA8(64, 128, 255, 255);
     }
-    return rgba_t{ (hf <= 0.5f ? 1.0f : 1.0f - 2.0f * (hf - 0.5f)),
-                   (hf <= 0.5f ? (2.0f * hf) : 1.0f), 0.0f, 1.0f };
+    rgba_t to_return{ 0.0f, 0.0f, 0.0f, 1.0f };
+
+    // If More than 50% Health Set Red to 100% (Yes the <= 0.5f is "More than 50%" in this case)
+    if (hf <= 0.5f)
+        to_return.r = 1.0f;
+    // Else if Less than 50% health Make red get reduced based on Percentage
+    else
+        to_return.r = 1.0f - (2.0f * (hf - 0.5f));
+    // If More than 50% Health Make the green get increased based on percentage
+    if (hf <= 0.5f)
+        to_return.g = 2.0f * hf;
+    // Else set Green to 100%
+    else
+        to_return.g = 1.0f;
+    return to_return;
+}
+constexpr rgba_t Health_dimgreen(int health, int max)
+{
+    float hf = float(health) / float(max);
+    if (hf > 1)
+    {
+        return colors::FromRGBA8(0, 128, 255, 255);
+    }
+    rgba_t to_return{ 0.0f, 0.0f, 0.0f, 1.0f };
+
+    // If More than 50% Health Set Red to 100% (Yes the <= 0.5f is "More than 50%" in this case)
+    if (hf <= 0.5f)
+        to_return.r = 1.0f;
+    // Else if Less than 50% health Make red get reduced based on Percentage
+    else
+        to_return.r = 1.0f - (2.0f * (hf - 0.5f));
+    // If More than 50% Health Make the green get increased based on percentage
+    if (hf <= 0.5f)
+        to_return.g = 2.0f * hf * 0.9f;
+    // Else set Green to 100%
+    else
+        to_return.g = 1.0f;
+    return to_return;
 }
 rgba_t RainbowCurrent();
 rgba_t EntityF(CachedEntity *ent);

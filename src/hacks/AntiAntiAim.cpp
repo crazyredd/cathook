@@ -1,12 +1,15 @@
 /*
-  Created on 29.07.18.
-*/
+ * Created on 29.07.18.
+ */
 
+#include <common.hpp>
 #include <hacks/AntiAntiAim.hpp>
 
-static settings::Bool enable{ "anti-anti-aim.enable", "false" };
+namespace hacks::shared::anti_anti_aim
+{
+static settings::Boolean enable{ "anti-anti-aim.enable", "false" };
 
-void hacks::shared::anti_anti_aim::createMove()
+void createMove()
 {
     if (!enable)
         return;
@@ -14,13 +17,13 @@ void hacks::shared::anti_anti_aim::createMove()
         return;
 
     IClientEntity *entity{ nullptr };
-    for (int i = 0; i < g_IEngine->GetMaxClients(); i++)
+    for (int i = 0; i <= g_IEngine->GetMaxClients(); i++)
     {
         resolveEnt(i, entity);
     }
 }
 
-void hacks::shared::anti_anti_aim::resolveEnt(int IDX, IClientEntity *entity)
+void resolveEnt(int IDX, IClientEntity *entity)
 {
     if (IDX == g_IEngine->GetLocalPlayer())
         return;
@@ -45,6 +48,8 @@ void hacks::shared::anti_anti_aim::resolveEnt(int IDX, IClientEntity *entity)
             g_Settings.brute.brutenum[IDX] = 0;
             brutepitch                     = !brutepitch;
         }
+        if (quota > 0.8f)
+            brutepitch = true;
         angles.y = fmod(angles.y + 180.0f, 360.0f);
         if (angles.y < 0)
             angles.y += 360.0f;
@@ -74,7 +79,7 @@ void hacks::shared::anti_anti_aim::resolveEnt(int IDX, IClientEntity *entity)
                 angles.y = 0.0f;
                 break;
             }
-        if (brutepitch || quota < 0.8f)
+        if (brutepitch)
             switch (g_Settings.brute.brutenum[IDX] % 4)
             {
             case 0:
@@ -91,3 +96,37 @@ void hacks::shared::anti_anti_aim::resolveEnt(int IDX, IClientEntity *entity)
             }
     }
 }
+
+void ResetPlayer(int idx)
+{
+    g_Settings.brute.choke[idx]       = {};
+    g_Settings.brute.brutenum[idx]    = 0;
+    g_Settings.brute.last_angles[idx] = {};
+    g_Settings.brute.lastsimtime      = 0.0f;
+}
+class ResolverListener : public IGameEventListener
+{
+public:
+    virtual void FireGameEvent(KeyValues *event)
+    {
+        if (!enable)
+            return;
+        std::string name(event->GetName());
+        if (name == "player_activate")
+        {
+            int uid    = event->GetInt("userid");
+            int entity = g_IEngine->GetPlayerForUserID(uid);
+            ResetPlayer(entity);
+        }
+        else if (name == "player_disconnect")
+        {
+            int uid    = event->GetInt("userid");
+            int entity = g_IEngine->GetPlayerForUserID(uid);
+            ResetPlayer(entity);
+        }
+    }
+};
+
+static ResolverListener listener;
+static InitRoutine init([]() { g_IGameEventManager->AddListener(&listener, false); });
+} // namespace hacks::shared::anti_anti_aim

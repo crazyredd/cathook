@@ -5,16 +5,12 @@
  *      Author: nullifiedcat
  */
 #include "common.hpp"
-#if ENABLE_VISUALS
-#include <glez/draw.hpp>
-#endif
 #include <settings/Bool.hpp>
 
-static settings::Bool debug_enginepred{ "debug.engine-pred-others", "false" };
-static settings::Bool debug_pp_extrapolate{ "debug.pp-extrapolate", "false" };
-static settings::Bool debug_pp_rockettimeping{ "debug.pp-rocket-time-ping",
-                                               "false" };
-
+static settings::Boolean debug_enginepred{ "debug.engine-pred-others", "false" };
+static settings::Boolean debug_pp_extrapolate{ "debug.pp-extrapolate", "false" };
+static settings::Boolean debug_pp_rockettimeping{ "debug.pp-rocket-time-ping", "false" };
+static settings::Int projpred_ticks{ "debug.prediction-ticks", "1" };
 // TODO there is a Vector() object created each call.
 
 Vector SimpleLatencyPrediction(CachedEntity *ent, int hb)
@@ -23,8 +19,7 @@ Vector SimpleLatencyPrediction(CachedEntity *ent, int hb)
         return Vector();
     Vector result;
     GetHitbox(ent, hb, result);
-    float latency = g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING) +
-                    g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_INCOMING);
+    float latency = g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING) + g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_INCOMING);
     result += CE_VECTOR(ent, netvar.vVelocity) * latency;
     return result;
 }
@@ -50,7 +45,7 @@ bool PerformProjectilePrediction(CachedEntity *target, int hitbox)
 }
 
 std::vector<std::vector<Vector>> predicted_players{};
-
+std::vector<std::vector<Vector>> player_vel{};
 int predicted_player_count = 0;
 
 void Prediction_CreateMove()
@@ -59,11 +54,31 @@ void Prediction_CreateMove()
     if (!setup)
     {
         setup = true;
-        predicted_players.resize(32);
+        predicted_players.resize(33);
+        player_vel.resize(33);
+    }
+    for (int i = 1; i <= g_GlobalVars->maxClients; i++)
+    {
+        CachedEntity *ent = ENTITY(i);
+        if (CE_GOOD(ent) && ent->m_bAlivePlayer())
+        {
+            Vector vel;
+            if (velocity::EstimateAbsVelocity)
+                velocity::EstimateAbsVelocity(RAW_ENT(ent), vel);
+            else
+                vel = CE_VECTOR(ent, netvar.vVelocity);
+            player_vel[i].push_back(vel);
+            while (player_vel[i].size() && player_vel[i].size() > *projpred_ticks)
+                player_vel[i].erase(player_vel[i].begin());
+        }
+        else
+        {
+            player_vel[i] = {};
+        }
     }
     if (!debug_enginepred)
         return;
-    for (int i = 1; i < g_GlobalVars->maxClients; i++)
+    for (int i = 1; i <= g_GlobalVars->maxClients; i++)
     {
         CachedEntity *ent = ENTITY(i);
         if (CE_GOOD(ent))
@@ -103,9 +118,7 @@ void Prediction_PaintTraverse()
                 Vector screen;
                 if (draw::WorldToScreen(predicted_players[i][j], screen))
                 {
-                    glez::draw::line(screen.x, screen.y,
-                                     previous_screen.x - screen.x,
-                                     previous_screen.y - screen.y, color, 0.5f);
+                    draw::Line(screen.x, screen.y, previous_screen.x - screen.x, previous_screen.y - screen.y, color, 0.5f);
                     previous_screen = screen;
                 }
                 else
@@ -123,20 +136,16 @@ Vector EnginePrediction(CachedEntity *entity, float time)
     Vector result      = entity->m_vecOrigin();
     IClientEntity *ent = RAW_ENT(entity);
 
-    typedef void (*SetupMoveFn)(IPrediction *, IClientEntity *, CUserCmd *,
-                                class IMoveHelper *, CMoveData *);
-    typedef void (*FinishMoveFn)(IPrediction *, IClientEntity *, CUserCmd *,
-                                 CMoveData *);
+    typedef void (*SetupMoveFn)(IPrediction *, IClientEntity *, CUserCmd *, class IMoveHelper *, CMoveData *);
+    typedef void (*FinishMoveFn)(IPrediction *, IClientEntity *, CUserCmd *, CMoveData *);
 
-    void **predictionVtable = *((void ***) g_IPrediction);
-    SetupMoveFn oSetupMove =
-        (SetupMoveFn)(*(unsigned *) (predictionVtable + 19));
-    FinishMoveFn oFinishMove =
-        (FinishMoveFn)(*(unsigned *) (predictionVtable + 20));
+    void **predictionVtable  = *((void ***) g_IPrediction);
+    SetupMoveFn oSetupMove   = (SetupMoveFn)(*(unsigned *) (predictionVtable + 19));
+    FinishMoveFn oFinishMove = (FinishMoveFn)(*(unsigned *) (predictionVtable + 20));
 
     // CMoveData *pMoveData = (CMoveData*)(sharedobj::client->lmap->l_addr +
     // 0x1F69C0C);  CMoveData movedata {};
-    auto object = std::make_unique<char[]>(165);
+    auto object          = std::make_unique<char[]>(165);
     CMoveData *pMoveData = (CMoveData *) object.get();
 
     float frameTime = g_GlobalVars->frametime;
@@ -146,9 +155,13 @@ Vector EnginePrediction(CachedEntity *entity, float time)
 
     memset(&fakecmd, 0, sizeof(CUserCmd));
 
-    Vector vel;
-    if (velocity::EstimateAbsVelocity)
-        velocity::EstimateAbsVelocity(RAW_ENT(entity), vel);
+    Vector vel(0.0f);
+    if (entity->m_IDX <= 33 && player_vel[entity->m_IDX].size())
+    {
+        for (auto entry : player_vel[entity->m_IDX])
+            vel += entry;
+        vel /= player_vel[entity->m_IDX].size();
+    }
     else
         vel = CE_VECTOR(entity, netvar.vVelocity);
     fakecmd.command_number = last_cmd_number;
@@ -162,8 +175,7 @@ Vector EnginePrediction(CachedEntity *entity, float time)
 
     NET_VAR(ent, 4188, CUserCmd *) = &fakecmd;
 
-    g_GlobalVars->curtime =
-        g_GlobalVars->interval_per_tick * NET_INT(ent, netvar.nTickBase);
+    g_GlobalVars->curtime   = g_GlobalVars->interval_per_tick * NET_INT(ent, netvar.nTickBase);
     g_GlobalVars->frametime = time;
 
     Vector old_origin      = entity->m_vecOrigin();
@@ -172,14 +184,11 @@ Vector EnginePrediction(CachedEntity *entity, float time)
     //*g_PredictionRandomSeed =
     // MD5_PseudoRandom(current_user_cmd->command_number) &
     // 0x7FFFFFFF;
-    g_IGameMovement->StartTrackPredictionErrors(
-        reinterpret_cast<CBasePlayer *>(ent));
+    g_IGameMovement->StartTrackPredictionErrors(reinterpret_cast<CBasePlayer *>(ent));
     oSetupMove(g_IPrediction, ent, &fakecmd, NULL, pMoveData);
-    g_IGameMovement->ProcessMovement(reinterpret_cast<CBasePlayer *>(ent),
-                                     pMoveData);
+    g_IGameMovement->ProcessMovement(reinterpret_cast<CBasePlayer *>(ent), pMoveData);
     oFinishMove(g_IPrediction, ent, &fakecmd, pMoveData);
-    g_IGameMovement->FinishTrackPredictionErrors(
-        reinterpret_cast<CBasePlayer *>(ent));
+    g_IGameMovement->FinishTrackPredictionErrors(reinterpret_cast<CBasePlayer *>(ent));
 
     NET_VAR(entity, 4188, CUserCmd *) = original_cmd;
 
@@ -192,9 +201,7 @@ Vector EnginePrediction(CachedEntity *entity, float time)
     return result;
 }
 
-Vector ProjectilePrediction_Engine(CachedEntity *ent, int hb, float speed,
-                                   float gravitymod,
-                                   float entgmod /* ignored */)
+Vector ProjectilePrediction_Engine(CachedEntity *ent, int hb, float speed, float gravitymod, float entgmod /* ignored */)
 {
     Vector origin = ent->m_vecOrigin();
     Vector hitbox;
@@ -203,9 +210,13 @@ Vector ProjectilePrediction_Engine(CachedEntity *ent, int hb, float speed,
 
     if (speed == 0.0f)
         return Vector();
-    Vector velocity;
-    if (velocity::EstimateAbsVelocity)
-        velocity::EstimateAbsVelocity(RAW_ENT(ent), velocity);
+    Vector velocity(0.0f);
+    if (ent->m_IDX <= 33 && player_vel[ent->m_IDX].size())
+    {
+        for (auto entry : player_vel[ent->m_IDX])
+            velocity += entry;
+        velocity /= player_vel[ent->m_IDX].size();
+    }
     else
         velocity = CE_VECTOR(ent, netvar.vVelocity);
     // TODO ProjAim
@@ -254,8 +265,7 @@ Vector ProjectilePrediction_Engine(CachedEntity *ent, int hb, float speed,
                   result.y - origin.y, result.z - origin.z);*/
     return result;
 }
-Vector BuildingPrediction(CachedEntity *building, Vector vec, float speed,
-                          float gravity)
+Vector BuildingPrediction(CachedEntity *building, Vector vec, float speed, float gravity)
 {
     if (!vec.z || CE_BAD(building))
         return Vector();
@@ -280,8 +290,7 @@ Vector BuildingPrediction(CachedEntity *building, Vector vec, float speed,
     float mindelta = 65536.0f;
     Vector bestpos = result;
     int maxsteps   = 300;
-    for (int steps = 0; steps < maxsteps;
-         steps++, currenttime += ((float) (2 * range) / (float) maxsteps))
+    for (int steps = 0; steps < maxsteps; steps++, currenttime += ((float) (2 * range) / (float) maxsteps))
     {
         Vector curpos = result;
         if (dtg > 0.0f)
@@ -291,8 +300,7 @@ Vector BuildingPrediction(CachedEntity *building, Vector vec, float speed,
         }
         float rockettime = g_pLocalPlayer->v_Eye.DistTo(curpos) / speed;
         if (debug_pp_rockettimeping)
-            rockettime +=
-                g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING);
+            rockettime += g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING);
         if (fabs(rockettime - currenttime) < mindelta)
         {
             besttime = currenttime;
@@ -306,8 +314,7 @@ Vector BuildingPrediction(CachedEntity *building, Vector vec, float speed,
     // S = at^2/2 ; t = sqrt(2S/a)*/
     return bestpos;
 }
-Vector ProjectilePrediction(CachedEntity *ent, int hb, float speed,
-                            float gravitymod, float entgmod)
+Vector ProjectilePrediction(CachedEntity *ent, int hb, float speed, float gravitymod, float entgmod)
 {
     if (!ent)
         return Vector();
@@ -318,8 +325,7 @@ Vector ProjectilePrediction(CachedEntity *ent, int hb, float speed,
     //        result = SimpleLatencyPrediction(ent, hb);
     //
     //}
-    float latency = g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING) +
-                    g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_INCOMING);
+    float latency = g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING) + g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_INCOMING);
 
     if (speed == 0.0f)
         return Vector();
@@ -340,8 +346,7 @@ Vector ProjectilePrediction(CachedEntity *ent, int hb, float speed,
     float mindelta = 65536.0f;
     Vector bestpos = result;
     int maxsteps   = 300;
-    for (int steps = 0; steps < maxsteps;
-         steps++, currenttime += ((float) (2 * range) / (float) maxsteps))
+    for (int steps = 0; steps < maxsteps; steps++, currenttime += ((float) (2 * range) / (float) maxsteps))
     {
         Vector curpos = result;
         curpos += vel * currenttime;
@@ -357,8 +362,7 @@ Vector ProjectilePrediction(CachedEntity *ent, int hb, float speed,
         }
         float rockettime = g_pLocalPlayer->v_Eye.DistTo(curpos) / speed;
         if (debug_pp_rockettimeping)
-            rockettime +=
-                g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING);
+            rockettime += g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING);
         if (fabs(rockettime - currenttime) < mindelta)
         {
             besttime = currenttime;
@@ -395,112 +399,6 @@ float DistanceToGround(Vector origin)
     Vector endpos = origin;
     endpos.z -= 8192;
     ray.Init(origin, endpos);
-    g_ITrace->TraceRay(ray, MASK_PLAYERSOLID, &trace::filter_no_player,
-                       &ground_trace);
+    g_ITrace->TraceRay(ray, MASK_PLAYERSOLID, &trace::filter_no_player, &ground_trace);
     return 8192.0f * ground_trace.fraction;
 }
-
-/*
-// Set of to be fuctions for preciting players, similear to ncc prediction.
-
-// The way air prediction works is that we use getabsvel to get a baseline
-position of where the player could be
-// next tick. Then we save that into the array for our math next tick.
-// After the first tick passed, we check to see how the GetAbsVel function
-actually performed and we can correct for its
-// mistakes by comparing the result from GetAbsVel last tick and where the
-player currently is this tick and applying an
-// offset for predictions.
-// With the new offset, you can use GetAbsVel and apply the offset to get 1 tick
-but for every other time you would need
-// to apply the offset due to the way airstrafing works.
-// GetAbsVel only works in a strait fassion of what the players current velocity
-and doesnt factor in what the players
-// next velocity could be due to the player having the ability to airstrafe and
-change that by quite a bit.
-
-// Ground prediction works in the way of it using GetAbsVel to get a baseline
-direction of where the player is going and
-// attempting to predict the players movement from that. The prediction should
-check its surroundings for corners, walls,
-// and the like to determine a path of where the player could potentially go. We
-would also want to check if players
-// collision box would intercept a wall or floor and interpolate even more with
-that in mind.
-// If a player is moving too steeply onto a wall, the prediction should stop
-there and count that as a place for where the
-// player would be for any time after it.
-
-// we can change between the two prediction types based on the ground flag
-netvar.
-
-// For using the predictions to work as projectile aimbot, we can determine the
-distance from the player kind of like how
-// the current projectile aimbot currently does but we will follow the predicted
-path instead of just placing a vector in
-// a really simple fassion.
-
-// This is based on the estimation that GetAbsVelocity predicts players next
-position for the next createmove tick
-
-// A set of vectors for every potential player
-static Vector last_predicted_vector[32];
-// An array to store predictions
-static Vector last_predictions[32];
-// Vectors to determine whether the player was in the air last tick
-static bool last_predicted_inair[32];
-
-// Should be run every createmove to predict playermovement
-void RunPredictPlayers() {
-
-        // Create a cached ent for use in the for loop
-        CachedEntity* ent;
-
-        // Loop through players
-        for (int i = 0; i < 32; i++) {
-
-                // Get an ent from current loop and check for dormancy/null
-                ent = ENTITY(i);
-                if (CE_BAD(ent)) continue;
-
-                // Grab netvar for ground to control type of prediction
-                int flags = CE_INT(g_pLocalPlayer->entity, netvar.iFlags);
-                bool ground = (flags & (1 << 0));
-
-                // For ground prediction, we would just use the old method for
-now if (ground) {
-
-                        // Set our last "in air" state to false
-                        last_predicted_vector_inair[i] = false;
-
-
-                // For air prediction, attempts to exerpolate strafing speed
-                } else {
-
-                        // If we were not in the air last tick, we need to
-create our first prediction if (!last_predicted_inair[i]) {
-
-                                // Set "in air" to true to allow air prediction
-to work next tick last_predicted_inair[i] = true;
-                                // Get our abs velocity and set it into the
-array velocity::EstimateAbsVelocity(RAW_ENT(ent), last_predicted_vector[i]);
-
-
-                        // Since we have been in the air last tick, we can
-create an offset off of prediction errors } else {
-
-                                // Create a storage vector and get abs velocity
-of Vector current_prediction; velocity::EstimateAbsVelocity(RAW_ENT(ent),
-current_prediction); last_predictions[32];
-                        }
-                }
-        }
-}
-
-
-
-// Draws our predicted player pathing for debug or visual use
-void DrawPredictPlayers() {
-        // TODO
-}
-*/

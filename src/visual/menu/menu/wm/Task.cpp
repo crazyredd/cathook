@@ -8,39 +8,33 @@
 
 // TODO FIXME Style?!
 
-static settings::RVariable<glez::rgba> color_closed{
-    "zk.style.task.color.text.closed", "888888"
-};
-static settings::RVariable<glez::rgba> color_focused{
-    "zk.style.task.color.text.focused", "ffffff"
-};
-static settings::RVariable<glez::rgba> color_open{
-    "zk.style.task.color.text.open", "cccccc"
-};
+namespace zerokernel_task
+{
+static settings::RVariable<rgba_t> color_closed{ "zk.style.task.color.text.closed", "888888" };
+static settings::RVariable<rgba_t> color_focused{ "zk.style.task.color.text.focused", "ffffff" };
+static settings::RVariable<rgba_t> color_open{ "zk.style.task.color.text.open", "cccccc" };
 
-static settings::RVariable<glez::rgba> color_hovered{
-    "zk.style.task.color.background.hover", "079797"
-};
-static settings::RVariable<glez::rgba> color_border{
-    "zk.style.task.color.border", "079797"
-};
+static settings::RVariable<rgba_t> color_hovered{ "zk.style.task.color.background.hover", "446498ff" };
+static settings::RVariable<rgba_t> color_border{ "zk.style.task.color.border", "446498ff" };
+
+} // namespace zerokernel_task
 
 void zerokernel::Task::render()
 {
     if (isHovered())
-        renderBackground(*color_hovered);
-    renderBorder(*color_border);
+        renderBackground(*zerokernel_task::color_hovered);
+    renderBorder(*zerokernel_task::color_border);
 
     if (window.isFocused())
     {
-        text.setColorText(&*color_focused);
+        text.setColorText(&*zerokernel_task::color_focused);
     }
     else
     {
         if (window.isHidden())
-            text.setColorText(&*color_closed);
+            text.setColorText(&*zerokernel_task::color_closed);
         else
-            text.setColorText(&*color_open);
+            text.setColorText(&*zerokernel_task::color_open);
     }
     text.render();
 }
@@ -63,8 +57,7 @@ bool zerokernel::Task::onLeftMouseClick()
     return true;
 }
 
-zerokernel::Task::Task(zerokernel::WMWindow &window)
-    : BaseMenuObject{}, window(window)
+zerokernel::Task::Task(zerokernel::WMWindow &window) : BaseMenuObject{}, window(window)
 {
     bb.width.setContent();
     bb.setMargin(4, 4, 4, 4);

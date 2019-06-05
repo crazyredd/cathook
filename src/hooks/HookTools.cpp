@@ -1,64 +1,61 @@
-#include "HookTools.hpp"
 #include "common.hpp"
+#include "HookTools.hpp"
 
-std::vector<HookedFunction *> &HookTools::GetHookedFunctions()
+namespace EC
 {
-    static std::vector<HookedFunction *> CreateMoves{};
-    return CreateMoves;
-}
 
-// -----------------------------------------------------------
-
-static std::array<int, 3> bounds{};
-
-void RunHookedFunctions(HookedFunctions_types type)
+struct EventCallbackData
 {
-    auto &HookedFunctions = HookTools::GetHookedFunctions();
-    for (int i = bounds.at(type); i < HookedFunctions.size(); i++)
+    explicit EventCallbackData(const EventFunction &function, std::string name, enum ec_priority priority) : function{ function }, priority{ int(priority) }, section{ name }, event_name{ name }
     {
-        if (!HookedFunctions.at(i)->run(type))
-            break;
+        section.m_name = name;
     }
-}
+    EventFunction function;
+    int priority;
+    ProfilerSection section;
+    std::string event_name;
+};
 
-void HookTools::CM()
-{
-    RunHookedFunctions(HF_CreateMove);
-}
-
-void HookTools::DRAW()
-{
-    RunHookedFunctions(HF_Draw);
-}
-
-void HookTools::PAINT()
-{
-    RunHookedFunctions(HF_Paint);
-}
-
-static InitRoutine init([]() {
-    auto &HookedFunctions = HookTools::GetHookedFunctions();
-    std::sort(HookedFunctions.begin(), HookedFunctions.end(),
-              [](HookedFunction *a, HookedFunction *b) { return *a > *b; });
-    logging::Info("Sorted Hooked Functions: %i", HookedFunctions.size());
-    for (int i = 0; i < bounds.size(); i++)
+static std::vector<EventCallbackData> events[ec_types::EcTypesSize];
+CatCommand evt_print("debug_print_events", "Print EC events", []() {
+    for (int i = 0; i < int(ec_types::EcTypesSize); ++i)
     {
-        for (int j = 0; j < HookedFunctions.size(); j++)
-        {
-            if (HookedFunctions.at(j)->m_type == i)
-            {
-                bounds.at(i) = j;
-                break;
-            }
-        }
+        logging::Info("%d events:", i);
+
+        for (auto it = events[i].begin(); it != events[i].end(); ++it)
+            logging::Info("%s", it->event_name.c_str());
+        logging::Info("");
     }
-    logging::Info(
-        "Initialized HookedFunction bounds: CM: %i, Draw: %i, Paint: %i",
-        bounds.at(0), bounds.at(1), bounds.at(2));
 });
 
-static CatCommand print("debug_print_hookedfunctions",
-                        "Print hooked functions (CreateMove, Draw, Paint)",
-                        []() {
+void Register(enum ec_types type, const EventFunction &function, const std::string &name, enum ec_priority priority)
+{
+    events[type].emplace_back(function, name, priority);
+    // Order vector to always keep priorities correct
+    std::sort(events[type].begin(), events[type].end(), [](EventCallbackData &a, EventCallbackData &b) { return a.priority < b.priority; });
+}
 
-                        });
+void Unregister(enum ec_types type, const std::string &name)
+{
+    auto &e = events[type];
+    for (auto it = e.begin(); it != e.end(); ++it)
+        if (it->event_name == name)
+        {
+            e.erase(it);
+            break;
+        }
+}
+
+void run(ec_types type)
+{
+    auto &vector = events[type];
+    for (auto &i : vector)
+    {
+#if ENABLE_PROFILER
+        volatile ProfilerNode node(i.section);
+#endif
+        i.function();
+    }
+}
+
+} // namespace EC

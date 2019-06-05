@@ -11,10 +11,9 @@
 
 #include "common.hpp"
 
-static settings::Bool enable{ "antiaim.enable", "0" };
-static settings::Bool crouch{ "antiaim.crouch", "0" };
-static settings::Int dur{ "antiaim.crouch.dur", "15" };
-static settings::Int dursneak{ "antiaim.crouch.dursneak", "15" };
+namespace hacks::shared::antiaim
+{
+static settings::Boolean enable{ "antiaim.enable", "0" };
 static settings::Float yaw{ "antiaim.yaw.static", "0" };
 static settings::Int yaw_mode{ "antiaim.yaw.mode", "0" };
 
@@ -22,22 +21,15 @@ static settings::Float pitch{ "antiaim.pitch.static", "0" };
 static settings::Int pitch_mode{ "antiaim.pitch.mode", "0" };
 
 static settings::Float roll{ "antiaim.roll", "0" };
-static settings::Bool no_clamping{ "antiaim.no-clamp", "0" };
+static settings::Boolean no_clamping{ "antiaim.no-clamp", "0" };
 static settings::Float spin{ "antiaim.spin-speed", "10" };
 
-static settings::Bool aaaa_enable{ "antiaim.aaaa.enable", "0" };
+static settings::Boolean aaaa_enable{ "antiaim.aaaa.enable", "0" };
 static settings::Float aaaa_interval{ "antiaim.aaaa.interval.seconds", "0" };
-static settings::Float aaaa_interval_random_high{
-    "antiaim.aaaa.interval.random-high", "10"
-};
-static settings::Float aaaa_interval_random_low{
-    "antiaim.aaaa.interval.random-low", "2"
-};
+static settings::Float aaaa_interval_random_high{ "antiaim.aaaa.interval.random-high", "10" };
+static settings::Float aaaa_interval_random_low{ "antiaim.aaaa.interval.random-low", "2" };
 static settings::Int aaaa_mode{ "antiaim.aaaa.mode", "0" };
 static settings::Button aaaa_flip_key{ "antiaim.aaaa.flip-key", "<null>" };
-
-namespace hacks::shared::antiaim
-{
 
 float cur_yaw  = 0.0f;
 int safe_space = 0;
@@ -71,8 +63,7 @@ float GetAAAATimerLength()
     }
     else
     {
-        return RandFloatRange((float) aaaa_interval_random_low,
-                              (float) aaaa_interval_random_high);
+        return RandFloatRange((float) aaaa_interval_random_low, (float) aaaa_interval_random_high);
     }
 }
 
@@ -213,8 +204,7 @@ bool ShouldAA(CUserCmd *cmd)
     if (cmd->buttons & IN_USE)
         return false;
     int classid = LOCAL_W->m_iClassID();
-    if ((cmd->buttons & IN_ATTACK) &&
-        !(IsTF2() && classid == CL_CLASS(CTFCompoundBow)) && CanShoot())
+    if ((cmd->buttons & IN_ATTACK) && !(IsTF2() && classid == CL_CLASS(CTFCompoundBow)) && CanShoot())
     {
         return false;
     }
@@ -235,8 +225,7 @@ bool ShouldAA(CUserCmd *cmd)
     /* no break */
     case weapon_melee:
     case weapon_throwable:
-        if ((cmd->buttons & (IN_ATTACK | IN_ATTACK2)) ||
-            g_pLocalPlayer->bAttackLastTick)
+        if ((cmd->buttons & (IN_ATTACK | IN_ATTACK2)) || g_pLocalPlayer->bAttackLastTick)
         {
             SetSafeSpace(8);
             return false;
@@ -279,8 +268,7 @@ float edgeDistance(float edgeRayYaw)
     // trace::g_pFilterNoPlayer to only focus on the enviroment
     g_ITrace->TraceRay(ray, 0x4200400B, &trace::filter_no_player, &trace);
     // Pythagorean theorem to calculate distance
-    float edgeDistance = (sqrt(pow(trace.startpos.x - trace.endpos.x, 2) +
-                               pow(trace.startpos.y - trace.endpos.y, 2)));
+    float edgeDistance = (sqrt(pow(trace.startpos.x - trace.endpos.x, 2) + pow(trace.startpos.y - trace.endpos.y, 2)));
     return edgeDistance;
 }
 
@@ -309,8 +297,7 @@ bool findEdge(float edgeOrigYaw)
     {
         edgeToEdgeOn = 1;
         // Correction for pitches to keep the head behind walls
-        if (((int) pitch_mode == 7) || ((int) pitch_mode == 2) ||
-            ((int) pitch_mode == 8))
+        if (((int) pitch_mode == 7) || ((int) pitch_mode == 2) || ((int) pitch_mode == 8))
             edgeToEdgeOn = 2;
         return true;
     }
@@ -318,8 +305,7 @@ bool findEdge(float edgeOrigYaw)
     {
         edgeToEdgeOn = 2;
         // Same as above
-        if (((int) pitch_mode == 7) || ((int) pitch_mode == 2) ||
-            ((int) pitch_mode == 8))
+        if (((int) pitch_mode == 7) || ((int) pitch_mode == 2) || ((int) pitch_mode == 8))
             edgeToEdgeOn = 1;
         return true;
     }
@@ -365,41 +351,6 @@ float useEdge(float edgeViewAngle)
     }
     // return with the angle choosen
     return edgeYaw;
-}
-
-Timer delay{};
-int val       = 0;
-int value[32] = { 0 };
-void FakeCrouch(CUserCmd *cmd)
-{
-    if (!crouch || !(cmd->buttons & IN_DUCK))
-        return;
-    static bool bDoCrouch   = false;
-    static int iCrouchCount = 0;
-
-    if (iCrouchCount == *dur)
-    {
-        iCrouchCount = 0;
-        bDoCrouch    = !bDoCrouch;
-    }
-    else
-    {
-        iCrouchCount++;
-    }
-    if (bDoCrouch)
-    {
-        cmd->buttons |= IN_DUCK;
-        *bSendPackets = true;
-    }
-    else
-    {
-        if (iCrouchCount + *dursneak < *dur)
-            cmd->buttons &= ~IN_DUCK;
-        *bSendPackets = false;
-    }
-
-    if ((cmd->buttons & IN_ATTACK))
-        *bSendPackets = true;
 }
 static float randyaw = 0.0f;
 void ProcessUserCmd(CUserCmd *cmd)
@@ -528,14 +479,12 @@ void ProcessUserCmd(CUserCmd *cmd)
             clamp = false;
         }
         break;
+    case 20:
     case 18: // Fake sideways
         y += *bSendPackets ? 90.0f : -90.0f;
         break;
     case 19: // Fake left
-        y += !*bSendPackets ? 0.0f : -90.0f;
-        break;
-    case 20: // Fake right
-        y += !*bSendPackets ? 0.0f : 90.0f;
+        y += !*bSendPackets ? -90.0f : -90.0f;
         break;
     case 21: // Fake reverse edge
         if (*bSendPackets)
@@ -586,7 +535,7 @@ void ProcessUserCmd(CUserCmd *cmd)
         clamp = false;
         break;
     case 8:
-        p     = -3256.0f;
+        p     = 360.0f;
         clamp = false;
         break;
     case 9:
@@ -612,7 +561,6 @@ void ProcessUserCmd(CUserCmd *cmd)
         p = GetAAAAPitch();
     }
     g_pLocalPlayer->bUseSilentAngles = true;
-    FakeCrouch(cmd);
 }
 
 bool isEnabled()

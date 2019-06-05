@@ -8,10 +8,10 @@
 #include <SDL2/SDL_events.h>
 #include <vector>
 #include <menu/interface/IMessageHandler.hpp>
-#include <glez/color.hpp>
 #include <functional>
 #include <menu/tinyxml2.hpp>
 #include <menu/KeyValue.hpp>
+#include <drawing.hpp>
 #include "BoundingBox.hpp"
 
 namespace zerokernel
@@ -33,9 +33,7 @@ public:
         // printf("~BaseMenuObject %u\n", --objectCount);
     }
 
-    inline BaseMenuObject()
-        : uid(object_sequence_number),
-          kv("Object" + std::to_string(uid)), bb{ *this }
+    inline BaseMenuObject() : uid(object_sequence_number), kv("Object" + std::to_string(uid)), bb{ *this }
     {
         ++object_sequence_number;
         // printf("BaseMenuObject(%u) %u\n", uid, ++objectCount);
@@ -57,8 +55,7 @@ public:
 
     virtual void show();
 
-    virtual BaseMenuObject *
-    findElement(const std::function<bool(BaseMenuObject *)> &search);
+    virtual BaseMenuObject *findElement(const std::function<bool(BaseMenuObject *)> &search);
 
     virtual void updateIsHovered();
 
@@ -113,8 +110,8 @@ public:
      */
 
     virtual void renderDebugOverlay();
-    void renderBackground(glez::rgba color);
-    void renderBorder(glez::rgba color);
+    void renderBackground(rgba_t color);
+    void renderBorder(rgba_t color);
 
     int xOffset{ 0 };
     int yOffset{ 0 };

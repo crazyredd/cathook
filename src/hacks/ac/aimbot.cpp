@@ -10,13 +10,11 @@
 #include <settings/Float.hpp>
 #include "common.hpp"
 
-static settings::Bool enable{ "find-cheaters.aimbot.enable", "true" };
-static settings::Float detect_angle{ "find-cheaters.aimbot.angle", "30" };
-static settings::Int detections_warning{ "find-cheaters.aimbot.detections",
-                                         "3" };
-
 namespace ac::aimbot
 {
+static settings::Boolean enable{ "find-cheaters.aimbot.enable", "true" };
+static settings::Float detect_angle{ "find-cheaters.aimbot.angle", "30" };
+static settings::Int detections_warning{ "find-cheaters.aimbot.detections", "3" };
 
 ac_data data_table[32];
 int amount[32];
@@ -61,8 +59,7 @@ void Update(CachedEntity *player)
             CachedEntity *wep = ENTITY(widx);
             if (!CE_GOOD(wep))
                 return;
-            if (deviation > float(detect_angle) &&
-                wep->m_iClassID() != CL_CLASS(CTFFlameThrower))
+            if (deviation > float(detect_angle) && wep->m_iClassID() != CL_CLASS(CTFFlameThrower))
             {
                 am++;
                 // logging::Info("[ac] %d deviation %.2f #%d", player->m_IDX,
@@ -78,13 +75,11 @@ void Update(CachedEntity *player)
                 {
 
                     const char *wp_name = "[unknown]";
-                    int widx = CE_INT(player, netvar.hActiveWeapon) & 0xFFF;
+                    int widx            = CE_INT(player, netvar.hActiveWeapon) & 0xFFF;
                     if (IDX_GOOD(widx))
                     {
                         CachedEntity *weapon = ENTITY(widx);
-                        wp_name              = weapon->InternalEntity()
-                                      ->GetClientClass()
-                                      ->GetName();
+                        wp_name              = weapon->InternalEntity()->GetClientClass()->GetName();
                         /*logging::Info("%d", weapon->m_IDX);
                         logging::Info("%s", );
                         IClientEntity* e_weapon = RAW_ENT(weapon);
@@ -94,10 +89,7 @@ void Update(CachedEntity *player)
                             if (wname) wp_name = wname;
                         }*/
                     }
-                    hacks::shared::anticheat::Accuse(
-                        player->m_IDX, "Aimbot",
-                        format("Weapon: ", wp_name, " | Deviation: ", deviation,
-                               "° | ", data.detections));
+                    hacks::shared::anticheat::Accuse(player->m_IDX, "Aimbot", format("Weapon: ", wp_name, " | Deviation: ", deviation, "° | ", data.detections));
                 }
             }
         }
@@ -108,8 +100,7 @@ void Event(KeyValues *event)
 {
     if (!enable)
         return;
-    if (!strcmp(event->GetName(), "player_death") ||
-        !strcmp(event->GetName(), "player_hurt"))
+    if (!strcmp(event->GetName(), "player_death") || !strcmp(event->GetName(), "player_hurt"))
     {
         int attacker = event->GetInt("attacker");
         int victim   = event->GetInt("userid");
@@ -119,8 +110,10 @@ void Event(KeyValues *event)
         {
             CachedEntity *victim   = ENTITY(vid);
             CachedEntity *attacker = ENTITY(eid);
-            if (Player_origs[vid].z != 0 && Player_origs[eid].z != 0)
-                if (Player_origs[vid].DistTo(Player_origs[eid]) > 250)
+            auto &Po_v             = Player_origs[vid];
+            auto &Po_e             = Player_origs[eid];
+            if (Po_v.z != 0 && Po_e.z != 0)
+                if (Po_v.DistTo(Po_e) > 250)
                 {
                     data_table[eid - 1].check_timer = 1;
                     data_table[eid - 1].last_weapon = event->GetInt("weaponid");

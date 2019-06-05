@@ -8,10 +8,9 @@
 #include <settings/Bool.hpp>
 #include "common.hpp"
 
-static settings::Bool enable{ "bunnyhop.enable", "false" };
-
 namespace hacks::shared::bunnyhop
 {
+static settings::Boolean enable{ "bunnyhop.enable", "false" };
 
 // Var for user settings
 
@@ -19,8 +18,10 @@ static int ticks_last_jump = 0;
 // static int perfect_jumps = 0;
 
 // Function called by game for movement
-void CreateMove()
+static void CreateMove()
 {
+    if (!CE_GOOD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer() || CE_BAD(LOCAL_W))
+        return;
     // Check user settings if bhop is enabled
     if (!enable)
         return;
@@ -50,4 +51,5 @@ void CreateMove()
     if (!jump)
         ticks_last_jump = 0;
 }
+static InitRoutine EC([]() { EC::Register(EC::CreateMove_NoEnginePred, CreateMove, "Bunnyhop", EC::average); });
 } // namespace hacks::shared::bunnyhop

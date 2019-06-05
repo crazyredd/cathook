@@ -11,20 +11,17 @@
 #include <sys/stat.h>
 #include <hacks/SkinChanger.hpp>
 #include <settings/Bool.hpp>
-
-static settings::Bool enable{ "skinchanger.enable", "false" };
-static settings::Bool debug{ "skinchanger.debug", "false" };
+#include <boost/functional/hash.hpp>
 
 namespace hacks::tf2::skinchanger
 {
+static settings::Boolean enable{ "skinchanger.enable", "false" };
+static settings::Boolean debug{ "skinchanger.debug", "false" };
 
 // Because fuck you, that's why.
-const char *sig_GetAttributeDefinition =
-    "55 89 E5 57 56 53 83 EC 6C C7 45 9C 00 00 00 00 8B 75 08 C7 45 A4 00 00 "
-    "00 00 8B 45 0C C6 45 A8 00 C6 45 A9 00 C6";
-const char *sig_SetRuntimeAttributeValue =
-    "55 89 E5 57 56 53 83 EC 3C 8B 5D 08 8B 4B 10 85 C9 7E 33";
-const char *sig_GetItemSchema = "55 89 E5 57 56 53 83 EC 1C 8B 1D ? ? ? ? 85 "
+const char *sig_GetAttributeDefinition   = "55 89 E5 57 56 53 83 EC 6C C7 45 9C 00 00 00 00";
+const char *sig_SetRuntimeAttributeValue = "55 89 E5 57 56 53 83 EC 3C 8B 5D 08 8B 4B 10 85 C9 7E 33";
+const char *sig_GetItemSchema            = "55 89 E5 57 56 53 83 EC 1C 8B 1D ? ? ? ? 85 "
                                 "DB 89 D8 74 0B 83 C4 1C 5B 5E 5F 5D C3";
 
 ItemSystem_t ItemSystem{ nullptr };
@@ -35,8 +32,7 @@ ItemSchemaPtr_t GetItemSchema(void)
 {
     if (!ItemSystem)
     {
-        ItemSystem = (ItemSystem_t) gSignatures.GetClientSignature(
-            (char *) sig_GetItemSchema);
+        ItemSystem = (ItemSystem_t) gSignatures.GetClientSignature((char *) sig_GetItemSchema);
     }
     return (void *) ((uint32_t)(ItemSystem()) + 4);
 }
@@ -99,54 +95,54 @@ void CAttributeList::SetAttribute(int index, float value)
     */
 }
 
-static CatCommand
-    set_attr("skinchanger_set", "Set Attribute", [](const CCommand &args) {
-        unsigned attrid = strtoul(args.Arg(1), nullptr, 10);
-        float attrv     = strtof(args.Arg(2), nullptr);
-        GetModifier(CE_INT(LOCAL_W, netvar.iItemDefinitionIndex))
-            .Set(attrid, attrv);
-        InvalidateCookie();
-    });
-static CatCommand
-    remove_attr("skinchanger_remove", "Remove attribute",
-                [](const CCommand &args) {
-                    unsigned attrid = strtoul(args.Arg(1), nullptr, 10);
-                    GetModifier(CE_INT(LOCAL_W, netvar.iItemDefinitionIndex))
-                        .Remove(attrid);
-                    InvalidateCookie();
-                });
-static CatCommand
-    set_redirect("skinchanger_redirect", "Set Redirect",
-                 [](const CCommand &args) {
-                     unsigned redirect = strtoul(args.Arg(1), nullptr, 10);
-                     GetModifier(CE_INT(LOCAL_W, netvar.iItemDefinitionIndex))
-                         .defidx_redirect = redirect;
-                     InvalidateCookie();
-                 });
-static CatCommand
-    dump_attrs("skinchanger_debug_attrs", "Dump attributes", []() {
-        CAttributeList *list =
-            (CAttributeList *) ((uintptr_t)(RAW_ENT(LOCAL_W)) +
-                                netvar.AttributeList);
-        logging::Info("ATTRIBUTE LIST: %i", list->m_Attributes.Size());
-        for (int i = 0; i < list->m_Attributes.Size(); i++)
-        {
-            logging::Info("%i %.2f", list->m_Attributes[i].defidx,
-                          list->m_Attributes[i].value);
-        }
-    });
+static std::array<int, 46> australium_table{ 4, 7, 13, 14, 15, 16, 18, 19, 20, 21, 29, 36, 38, 45, 61, 132, 141, 194, 197, 200, 201, 202, 203, 205, 206, 207, 208, 211, 228, 424, 654, 658, 659, 662, 663, 664, 665, 669, 1000, 1004, 1006, 1007, 1078, 1082, 1085, 1149 };
+static std::array<std::pair<int, int>, 12> redirects{ std::pair{ 264, 1071 }, std::pair{ 18, 205 }, std::pair{ 13, 200 }, std::pair{ 21, 208 }, std::pair{ 19, 206 }, std::pair{ 20, 207 }, std::pair{ 15, 202 }, std::pair{ 7, 197 }, std::pair{ 29, 211 }, std::pair{ 14, 201 }, std::pair{ 16, 203 }, std::pair{ 4, 194 } };
+static CatCommand australize("australize", "Make everything australium", []() {
+    enable = true;
+    for (auto i : redirects)
+        GetModifier(i.first).defidx_redirect = i.second;
+    for (auto i : australium_table)
+    {
+        GetModifier(i).Set(2027, 1);
+        GetModifier(i).Set(2022, 1);
+        GetModifier(i).Set(542, 1);
+    }
+    InvalidateCookie();
+});
+static CatCommand set_attr("skinchanger_set", "Set Attribute", [](const CCommand &args) {
+    unsigned attrid = strtoul(args.Arg(1), nullptr, 10);
+    float attrv     = strtof(args.Arg(2), nullptr);
+    GetModifier(CE_INT(LOCAL_W, netvar.iItemDefinitionIndex)).Set(attrid, attrv);
+    InvalidateCookie();
+});
+static CatCommand remove_attr("skinchanger_remove", "Remove attribute", [](const CCommand &args) {
+    unsigned attrid = strtoul(args.Arg(1), nullptr, 10);
+    GetModifier(CE_INT(LOCAL_W, netvar.iItemDefinitionIndex)).Remove(attrid);
+    InvalidateCookie();
+});
+static CatCommand set_redirect("skinchanger_redirect", "Set Redirect", [](const CCommand &args) {
+    unsigned redirect                                                         = strtoul(args.Arg(1), nullptr, 10);
+    GetModifier(CE_INT(LOCAL_W, netvar.iItemDefinitionIndex)).defidx_redirect = redirect;
+    InvalidateCookie();
+});
+static CatCommand dump_attrs("skinchanger_debug_attrs", "Dump attributes", []() {
+    CAttributeList *list = (CAttributeList *) ((uintptr_t)(RAW_ENT(LOCAL_W)) + netvar.AttributeList);
+    logging::Info("ATTRIBUTE LIST: %i", list->m_Attributes.Size());
+    for (int i = 0; i < list->m_Attributes.Size(); i++)
+    {
+        logging::Info("%i %.2f", list->m_Attributes[i].defidx, list->m_Attributes[i].value);
+    }
+});
 
-static CatCommand
-    list_redirects("skinchanger_redirect_list", "Dump redirects", []() {
-        for (const auto &mod : modifier_map)
+static CatCommand list_redirects("skinchanger_redirect_list", "Dump redirects", []() {
+    for (const auto &mod : modifier_map)
+    {
+        if (mod.second.defidx_redirect)
         {
-            if (mod.second.defidx_redirect)
-            {
-                logging::Info("%d -> %d", mod.first,
-                              mod.second.defidx_redirect);
-            }
+            logging::Info("%d -> %d", mod.first, mod.second.defidx_redirect);
         }
-    });
+    }
+});
 static CatCommand save("skinchanger_save", "Save", [](const CCommand &args) {
     std::string filename = "skinchanger";
     if (args.ArgC() > 1)
@@ -163,29 +159,23 @@ static CatCommand load("skinchanger_load", "Load", [](const CCommand &args) {
     }
     Load(filename);
 });
-static CatCommand load_merge("skinchanger_load_merge", "Load with merge",
-                             [](const CCommand &args) {
-                                 std::string filename = "skinchanger";
-                                 if (args.ArgC() > 1)
-                                 {
-                                     filename = args.Arg(1);
-                                 }
-                                 Load(filename, true);
-                             });
-static CatCommand remove_redirect("skinchanger_remove_redirect",
-                                  "Remove redirect", [](const CCommand &args) {
-                                      unsigned redirectid =
-                                          strtoul(args.Arg(1), nullptr, 10);
-                                      GetModifier(redirectid).defidx_redirect =
-                                          0;
-                                      logging::Info("Redirect removed");
-                                      InvalidateCookie();
-                                  });
-static CatCommand reset("skinchanger_reset", "Reset",
-                        []() { modifier_map.clear(); });
+static CatCommand load_merge("skinchanger_load_merge", "Load with merge", [](const CCommand &args) {
+    std::string filename = "skinchanger";
+    if (args.ArgC() > 1)
+    {
+        filename = args.Arg(1);
+    }
+    Load(filename, true);
+});
+static CatCommand remove_redirect("skinchanger_remove_redirect", "Remove redirect", [](const CCommand &args) {
+    unsigned redirectid                     = strtoul(args.Arg(1), nullptr, 10);
+    GetModifier(redirectid).defidx_redirect = 0;
+    logging::Info("Redirect removed");
+    InvalidateCookie();
+});
+static CatCommand reset("skinchanger_reset", "Reset", []() { modifier_map.clear(); });
 
-static CatCommand invalidate_cookies("skinchanger_bite_cookie", "Bite Cookie",
-                                     InvalidateCookie);
+static CatCommand invalidate_cookies("skinchanger_bite_cookie", "Bite Cookie", InvalidateCookie);
 
 void FrameStageNotify(int stage)
 {
@@ -202,19 +192,13 @@ void FrameStageNotify(int stage)
 
     if (!SetRuntimeAttributeValueFn)
     {
-        SetRuntimeAttributeValueFn =
-            (SetRuntimeAttributeValue_t)(gSignatures.GetClientSignature(
-                (char *) sig_SetRuntimeAttributeValue));
-        logging::Info("SetRuntimeAttributeValue: 0x%08x",
-                      SetRuntimeAttributeValueFn);
+        SetRuntimeAttributeValueFn = (SetRuntimeAttributeValue_t)(gSignatures.GetClientSignature((char *) sig_SetRuntimeAttributeValue));
+        logging::Info("SetRuntimeAttributeValue: 0x%08x", SetRuntimeAttributeValueFn);
     }
     if (!GetAttributeDefinitionFn)
     {
-        GetAttributeDefinitionFn =
-            (GetAttributeDefinition_t)(gSignatures.GetClientSignature(
-                (char *) sig_GetAttributeDefinition));
-        logging::Info("GetAttributeDefinition: 0x%08x",
-                      GetAttributeDefinitionFn);
+        GetAttributeDefinitionFn = (GetAttributeDefinition_t)(gSignatures.GetClientSignature((char *) sig_GetAttributeDefinition));
+        logging::Info("GetAttributeDefinition: 0x%08x", GetAttributeDefinitionFn);
     }
 
     weapon_list   = (int *) ((unsigned) (RAW_ENT(LOCAL_E)) + netvar.hMyWeapons);
@@ -240,8 +224,7 @@ void FrameStageNotify(int stage)
             continue;
         if ((my_weapon_ptr != last_weapon_out) || !cookie.Check())
         {
-            GetModifier(NET_INT(entity, netvar.iItemDefinitionIndex))
-                .Apply(eid);
+            GetModifier(NET_INT(entity, netvar.iItemDefinitionIndex)).Apply(eid);
         }
     }
     if ((my_weapon_ptr != last_weapon_out) || !cookie.Check())
@@ -259,22 +242,17 @@ void DrawText()
         return;
     if (CE_GOOD(LOCAL_W))
     {
-        AddSideString(
-            format("dIDX: ", CE_INT(LOCAL_W, netvar.iItemDefinitionIndex)));
-        list = (CAttributeList *) ((uintptr_t)(RAW_ENT(LOCAL_W)) +
-                                   netvar.AttributeList);
+        AddSideString(format("dIDX: ", CE_INT(LOCAL_W, netvar.iItemDefinitionIndex)));
+        list = (CAttributeList *) ((uintptr_t)(RAW_ENT(LOCAL_W)) + netvar.AttributeList);
         for (int i = 0; i < list->m_Attributes.Size(); i++)
         {
-            AddSideString(format('[', i, "] ", list->m_Attributes[i].defidx,
-                                 ": ", list->m_Attributes[i].value));
+            AddSideString(format('[', i, "] ", list->m_Attributes[i].defidx, ": ", list->m_Attributes[i].value));
         }
     }
 }
 
-#define BINARY_FILE_WRITE(handle, data)                                        \
-    handle.write(reinterpret_cast<const char *>(&data), sizeof(data))
-#define BINARY_FILE_READ(handle, data)                                         \
-    handle.read(reinterpret_cast<char *>(&data), sizeof(data))
+#define BINARY_FILE_WRITE(handle, data) handle.write(reinterpret_cast<const char *>(&data), sizeof(data))
+#define BINARY_FILE_READ(handle, data) handle.read(reinterpret_cast<char *>(&data), sizeof(data))
 
 void Save(std::string filename)
 {
@@ -288,8 +266,7 @@ void Save(std::string filename)
         closedir(cathook_directory);
     try
     {
-        std::ofstream file(DATA_PATH "/skinchanger/" + filename,
-                           std::ios::out | std::ios::binary);
+        std::ofstream file(DATA_PATH "/skinchanger/" + filename, std::ios::out | std::ios::binary);
         BINARY_FILE_WRITE(file, SERIALIZE_VERSION);
         size_t size = modifier_map.size();
         BINARY_FILE_WRITE(file, size);
@@ -305,8 +282,7 @@ void Save(std::string filename)
             // this code is a bit tricky - I'm treating vector as an array
             if (modifier_count)
             {
-                file.write(reinterpret_cast<const char *>(modifiers.data()),
-                           modifier_count * sizeof(attribute_s));
+                file.write(reinterpret_cast<const char *>(modifiers.data()), modifier_count * sizeof(attribute_s));
             }
         }
         file.close();
@@ -330,14 +306,12 @@ void Load(std::string filename, bool merge)
         closedir(cathook_directory);
     try
     {
-        std::ifstream file(DATA_PATH "/skinchanger/" + filename,
-                           std::ios::in | std::ios::binary);
+        std::ifstream file(DATA_PATH "/skinchanger/" + filename, std::ios::in | std::ios::binary);
         unsigned file_serialize = 0;
         BINARY_FILE_READ(file, file_serialize);
         if (file_serialize != SERIALIZE_VERSION)
         {
-            logging::Info(
-                "Outdated/corrupted SkinChanger file! Cannot load this.");
+            logging::Info("Outdated/corrupted SkinChanger file! Cannot load this.");
             file.close();
             return;
         }
@@ -355,12 +329,10 @@ void Load(std::string filename, bool merge)
             BINARY_FILE_READ(file, modifier.defidx_redirect);
             BINARY_FILE_READ(file, count);
             modifier.modifiers.resize(count);
-            file.read(reinterpret_cast<char *>(modifier.modifiers.data()),
-                      sizeof(attribute_s) * count);
+            file.read(reinterpret_cast<char *>(modifier.modifiers.data()), sizeof(attribute_s) * count);
             if (!merge)
             {
-                modifier_map.insert(
-                    std::make_pair(defindex, std::move(modifier)));
+                modifier_map.insert(std::make_pair(defindex, std::move(modifier)));
             }
             else
             {
@@ -371,8 +343,7 @@ void Load(std::string filename, bool merge)
             }
         }
         file.close();
-        logging::Info("Reading successful! Result: %i entries.",
-                      modifier_map.size());
+        logging::Info("Reading successful! Result: %i entries.", modifier_map.size());
     }
     catch (std::exception &e)
     {
@@ -396,8 +367,7 @@ void def_attribute_modifier::Set(int id, float value)
         return;
     }
     modifiers.push_back(attribute_s{ (uint16_t) id, value });
-    logging::Info("Added new attribute: %i %.2f (%i)", id, value,
-                  modifiers.size());
+    logging::Info("Added new attribute: %i %.2f (%i)", id, value, modifiers.size());
 }
 
 void InvalidateCookie()
@@ -478,13 +448,11 @@ void def_attribute_modifier::Apply(int entity)
         return;
     if (!re::C_BaseCombatWeapon::IsBaseCombatWeapon(ent))
         return;
-    if (defidx_redirect &&
-        NET_INT(ent, netvar.iItemDefinitionIndex) != defidx_redirect)
+    if (defidx_redirect && NET_INT(ent, netvar.iItemDefinitionIndex) != defidx_redirect)
     {
         NET_INT(ent, netvar.iItemDefinitionIndex) = defidx_redirect;
         if (debug)
-            logging::Info("Redirect -> %i",
-                          NET_INT(ent, netvar.iItemDefinitionIndex));
+            logging::Info("Redirect -> %i", NET_INT(ent, netvar.iItemDefinitionIndex));
         GetModifier(defidx_redirect).Apply(entity);
         return;
     }

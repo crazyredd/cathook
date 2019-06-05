@@ -8,16 +8,15 @@
 #include <settings/Bool.hpp>
 #include "common.hpp"
 
-static settings::Bool enable{ "spy-alert.enable", "false" };
-static settings::Float distance_warning{ "spy-alert.distance.warning", "500" };
-static settings::Float distance_alert{ "spy-alert.distance.alert", "200" };
-static settings::Bool sound_alert{ "spy-alert.sound", "true" };
-static settings::Float sound_alert_interval{ "spy-alert.alert-interval", "3" };
-static settings::Bool voicemenu{ "spy-alert.voicemenu", "false" };
-static settings::Bool invisible{ "spy-alert.alert-for-invisible", "false" };
-
 namespace hacks::tf::spyalert
 {
+static settings::Boolean enable{ "spy-alert.enable", "false" };
+static settings::Float distance_warning{ "spy-alert.distance.warning", "500" };
+static settings::Float distance_alert{ "spy-alert.distance.alert", "200" };
+static settings::Boolean sound_alert{ "spy-alert.sound", "true" };
+static settings::Float sound_alert_interval{ "spy-alert.alert-interval", "3" };
+static settings::Boolean voicemenu{ "spy-alert.voicemenu", "false" };
+static settings::Boolean invisible{ "spy-alert.alert-for-invisible", "false" };
 
 bool warning_triggered  = false;
 bool backstab_triggered = false;
@@ -69,8 +68,7 @@ void Draw()
         {
             if (!backstab_triggered)
             {
-                if (sound_alert && (g_GlobalVars->curtime - last_say) >
-                                       (float) sound_alert_interval)
+                if (sound_alert && (g_GlobalVars->curtime - last_say) > (float) sound_alert_interval)
                 {
                     g_ISurface->PlaySound("vo/demoman_cloakedspy03.mp3");
                     last_say = g_GlobalVars->curtime;
@@ -79,18 +77,14 @@ void Draw()
             }
             if (voicemenu && lastVoicemenu.test_and_set(5000))
                 g_IEngine->ClientCmd_Unrestricted("voicemenu 1 1");
-            AddCenterString(format("BACKSTAB WARNING! ",
-                                   (int) (closest_spy_distance / 64 * 1.22f),
-                                   "m (", spy_count, ")"),
-                            colors::red);
+            AddCenterString(format("BACKSTAB WARNING! ", (int) (closest_spy_distance / 64 * 1.22f), "m (", spy_count, ")"), colors::red);
         }
         else if (closest_spy_distance < (float) distance_warning)
         {
             backstab_triggered = false;
             if (!warning_triggered)
             {
-                if (sound_alert && (g_GlobalVars->curtime - last_say) >
-                                       (float) sound_alert_interval)
+                if (sound_alert && (g_GlobalVars->curtime - last_say) > (float) sound_alert_interval)
                 {
                     g_ISurface->PlaySound("vo/demoman_cloakedspy01.mp3");
                     last_say = g_GlobalVars->curtime;
@@ -99,10 +93,7 @@ void Draw()
             }
             if (voicemenu && lastVoicemenu.test_and_set(5000))
                 g_IEngine->ClientCmd_Unrestricted("voicemenu 1 1");
-            AddCenterString(format("Incoming spy! ",
-                                   (int) (closest_spy_distance / 64 * 1.22f),
-                                   "m (", spy_count, ")"),
-                            colors::yellow);
+            AddCenterString(format("Incoming spy! ", (int) (closest_spy_distance / 64 * 1.22f), "m (", spy_count, ")"), colors::yellow);
         }
     }
     else
@@ -111,4 +102,7 @@ void Draw()
         backstab_triggered = false;
     }
 }
+#if ENABLE_VISUALS
+static InitRoutine EC([]() { EC::Register(EC::Draw, Draw, "spyalert", EC::average); });
+#endif
 } // namespace hacks::tf::spyalert

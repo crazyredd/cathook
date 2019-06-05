@@ -9,6 +9,7 @@
 
 #include <core/sharedobj.hpp>
 #include <string>
+#include <engine/IEngineSound.h>
 
 namespace vgui
 {
@@ -52,12 +53,15 @@ class TFGCClientSystem;
 class CGameRules;
 class IEngineVGui;
 class IUniformRandomStream;
+class IFileSystem;
+class IMDLCache;
 
 extern TFGCClientSystem *g_TFGCClientSystem;
 extern CHud *g_CHUD;
 extern ISteamClient *g_ISteamClient;
 extern ISteamFriends *g_ISteamFriends;
 extern IVEngineClient013 *g_IEngine;
+extern IEngineSound *g_ISoundEngine;
 extern vgui::ISurface *g_ISurface;
 extern vgui::IPanel *g_IPanel;
 extern IClientEntityList *g_IEntityList;
@@ -67,7 +71,8 @@ extern IBaseClientDLL *g_IBaseClient;
 extern IEngineTrace *g_ITrace;
 extern IVModelInfoClient *g_IModelInfo;
 extern IInputSystem *g_IInputSystem;
-extern CGlobalVarsBase *g_GlobalVars;
+extern CGlobalVarsBase **rg_GlobalVars;
+#define g_GlobalVars (*rg_GlobalVars)
 extern IPrediction *g_IPrediction;
 extern IGameMovement *g_IGameMovement;
 extern IInput *g_IInput;
@@ -86,5 +91,8 @@ extern IGameEventManager *g_IGameEventManager;
 extern CGameRules *g_pGameRules;
 extern IEngineVGui *g_IEngineVGui;
 extern IUniformRandomStream *g_pUniformStream;
+extern int *g_PredictionRandomSeed;
+extern IFileSystem *g_IFileSystem;
+extern IMDLCache *g_IMDLCache;
 
 void CreateInterfaces();

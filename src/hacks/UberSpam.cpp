@@ -9,23 +9,20 @@
 #include <hacks/UberSpam.hpp>
 #include <settings/Int.hpp>
 
-static settings::Int source{ "uberspam.source", "0" };
-static settings::Bool team_chat{ "uberspam.team-chat", "true" };
-static settings::String custom_file{ "uberspam.file", "uberspam.txt" };
-
-static settings::Bool on_ready{ "uberspam.triggers.ready", "true" };
-static settings::Bool on_used{ "uberspam.triggers.used", "true" };
-static settings::Bool on_ended{ "uberspam.triggers.ended", "true" };
-static settings::Int on_build{ "uberspam.triggers.every-n-percent", "25" };
-
 namespace hacks::tf::uberspam
 {
+static settings::Int source{ "uberspam.source", "0" };
+static settings::Boolean team_chat{ "uberspam.team-chat", "true" };
+static settings::String custom_file{ "uberspam.file", "uberspam.txt" };
+
+static settings::Boolean on_ready{ "uberspam.triggers.ready", "true" };
+static settings::Boolean on_used{ "uberspam.triggers.used", "true" };
+static settings::Boolean on_ended{ "uberspam.triggers.ended", "true" };
+static settings::Int on_build{ "uberspam.triggers.every-n-percent", "25" };
 
 TextFile custom_lines;
 
-static CatCommand custom_file_reload("uberspam_file_reload",
-                                     "Reload Ubercharge Spam File",
-                                     []() { custom_lines.Load(*custom_file); });
+static CatCommand custom_file_reload("uberspam_file_reload", "Reload Ubercharge Spam File", []() { custom_lines.Load(*custom_file); });
 
 const std::vector<std::string> *GetSource()
 {
@@ -58,8 +55,10 @@ int ChargePercentLineIndex(float chargef)
     return 3 + (charge / cpl);
 }
 
-void CreateMove()
+static void CreateMove()
 {
+    if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer() || CE_BAD(LOCAL_W))
+        return;
     if (!GetSource())
         return;
     if (LOCAL_W->m_iClassID() != CL_CLASS(CWeaponMedigun))
@@ -94,17 +93,13 @@ void CreateMove()
         {
             if ((int) (charge * 100.0f) != 0 && on_build)
             {
-                int chargeperline = ((int) on_build >= 100)
-                                        ? (100 / (GetSource()->size() - 2))
-                                        : (int) on_build;
+                int chargeperline = ((int) on_build >= 100) ? (100 / (GetSource()->size() - 2)) : (int) on_build;
                 if (chargeperline < 1)
                     chargeperline = 1;
                 if ((int) (charge * 100.0f) % chargeperline == 0)
                 {
-                    std::string res =
-                        GetSource()->at(ChargePercentLineIndex(charge));
-                    ReplaceString(res, "%i%",
-                                  std::to_string((int) (charge * 100.0f)));
+                    std::string res = GetSource()->at(ChargePercentLineIndex(charge));
+                    ReplaceString(res, "%i%", std::to_string((int) (charge * 100.0f)));
                     chat_stack::Say(res, !!team_chat);
                 }
             }
@@ -114,18 +109,9 @@ void CreateMove()
     last_charge        = (int) (100.0f * charge);
 }
 
+static InitRoutine register_EC([]() { EC::Register(EC::CreateMove, CreateMove, "Uberspam", EC::average); });
 // Ready, Used, Ended, %...
 
-const std::vector<std::string> builtin_cathook = {
-    "-> I am charged!",
-    "-> Not a step back! UBERCHARGE USED!",
-    "-> My Ubercharge comes to an end!",
-    "-> I have %i%% of ubercharge!",
-    "-> I have half of the ubercharge!",
-    "-> Ubercharge almost ready! (%i%%)"
-};
-const std::vector<std::string> builtin_nonecore = {
-    ">>> GET READY TO RUMBLE! <<<", ">>> CHEATS ACTIVATED! <<<",
-    ">>> RUMBLE COMPLETE! <<<", ">>> RUMBLE IS %i%% CHARGED! <<<"
-};
+const std::vector<std::string> builtin_cathook  = { "-> I am charged!", "-> Not a step back! UBERCHARGE USED!", "-> My Ubercharge comes to an end!", "-> I have %i%% of ubercharge!", "-> I have half of the ubercharge!", "-> Ubercharge almost ready! (%i%%)" };
+const std::vector<std::string> builtin_nonecore = { ">>> GET READY TO RUMBLE! <<<", ">>> CHEATS ACTIVATED! <<<", ">>> RUMBLE COMPLETE! <<<", ">>> RUMBLE IS %i%% CHARGED! <<<" };
 } // namespace hacks::tf::uberspam

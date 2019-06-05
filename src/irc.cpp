@@ -1,23 +1,30 @@
+#include "config.h"
+#if ENABLE_IRC
 #include "common.hpp"
 #include "irc.hpp"
+#include "CatBot.hpp"
 #include "ChIRC.hpp"
 #include "hack.hpp"
 #include "ucccccp.hpp"
+#include "PlayerTools.hpp"
 
 namespace IRC
 {
-static settings::Bool enabled("irc.enabled", "true");
-static settings::Bool anon("irc.anon", "true");
-static settings::Bool authenticate("irc.auth", "true");
+static settings::Boolean enabled("irc.enabled", "true");
+static settings::Boolean anon("irc.anon", "true");
+static settings::Boolean authenticate("irc.auth", "true");
 static settings::String channel("irc.channel", "#cat_comms");
 static settings::String address("irc.address", "cathook.irc.inkcat.net");
 static settings::Int port("irc.port", "8080");
 static settings::String commandandcontrol_channel("irc.cc.channel", "");
 static settings::String commandandcontrol_password("irc.cc.password", "");
 
-static settings::Bool irc_party{ "irc.cc.party", "false" };
-static settings::Bool answer_steam{ "irc.cc.respondparty", "false" };
+static settings::Boolean transfer_leader_on_kick("irc.cc.leader-transfer", "false");
+static settings::Boolean botonly("irc.cc.command-bot-only", "true");
+static settings::Boolean irc_party{ "irc.cc.party", "false" };
+static settings::Boolean answer_steam{ "irc.cc.respondparty", "false" };
 static settings::Int party_cooldown{ "irc.cc.party-cooldown", "60" };
+static settings::Int party_size{ "irc.cc.party-size", "6" };
 static Timer last_sent_steamid{};
 static Timer last_steamid_received{};
 static std::vector<unsigned> steamidvec{};
@@ -34,8 +41,7 @@ void printmsg(std::string &usr, std::string &msg)
     if (g_Settings.bInvalid)
         logging::Info("[IRC] %s: %s", usr.c_str(), msg.c_str());
     else
-        PrintChat("\x07%06X[IRC] %s\x01: %s", 0xe05938, usr.c_str(),
-                  msg.c_str());
+        PrintChat("\x07%06X[IRC] %s\x01: %s", 0xe05938, usr.c_str(), msg.c_str());
 }
 void printmsgcopy(std::string usr, std::string msg)
 {
@@ -68,7 +74,7 @@ void authreq(std::string &msg)
     else
         steamidhash = msg.substr(4);
 
-    for (int i = 0; i < g_IEngine->GetMaxClients(); i++)
+    for (int i = 0; i <= g_IEngine->GetMaxClients(); i++)
     {
         if (i == g_pLocalPlayer->entity_idx)
             continue;
@@ -76,10 +82,11 @@ void authreq(std::string &msg)
         // Get playerinfo and check if player on server
         if (!g_IEngine->GetPlayerInfo(i, &pinfo))
             continue;
-        auto tarsteamid = pinfo.friendsID;
+        auto tarsteamid        = pinfo.friendsID;
+        std::string total_hash = std::to_string(tarsteamid) + pinfo.name;
         MD5Value_t result;
         // Hash steamid
-        MD5_ProcessSingleBuffer(&tarsteamid, sizeof(tarsteamid), result);
+        MD5_ProcessSingleBuffer(total_hash.c_str(), strlen(total_hash.c_str()), result);
         // Get bits of hash and store in string
         std::string tarhash;
         for (auto i : result.bits)
@@ -108,9 +115,15 @@ void authreq(std::string &msg)
         }
     }
 }
+
 void cc_party(std::string &msg)
 {
-    if (msg.find("cc_partysteamrep") == 0)
+    auto party_client = re::CTFPartyClient::GTFPartyClient();
+    if (!party_client)
+        return;
+    int online_members = party_client->GetNumOnlineMembers();
+    int members        = party_client->GetNumMembers();
+    if (msg.find("cc_partysteamrep") == 0 && ((online_members < *party_size && online_members != 6) || online_members < members))
     {
         if (!irc_party)
             return;
@@ -123,18 +136,32 @@ void cc_party(std::string &msg)
         {
             return;
         }
-        steamidvec.push_back(steamid);
-        last_steamid_received.update();
+        if (std::find(steamidvec.begin(), steamidvec.end(), steamid) == steamidvec.end())
+        {
+            steamidvec.push_back(steamid);
+            last_steamid_received.update();
+        }
     }
-    else if (answer_steam && msg.find("cc_partysteam") == 0)
+    else if (answer_steam && msg.find("cc_partysteam") == 0 && ((online_members < *party_size && online_members != 6) || online_members < members))
     {
-        irc.privmsg(format("cc_partysteamrep",
-                           g_ISteamUser->GetSteamID().GetAccountID()),
-                    true);
+        irc.privmsg(format("cc_partysteamrep", g_ISteamUser->GetSteamID().GetAccountID()), true);
+        unsigned steamid;
+        try
+        {
+            steamid = std::stoul(msg.substr(13));
+        }
+        catch (std::invalid_argument)
+        {
+            return;
+        }
+        if (std::find(steamidvec.begin(), steamidvec.end(), steamid) == steamidvec.end())
+            steamidvec.push_back(steamid);
     }
 }
 void cc_cmd(std::string &msg)
 {
+    if (!hacks::shared::catbot::catbotmode && botonly)
+        return;
     // Outdated cc_cmd. Return
     if (msg.find("$cmd") == msg.npos)
         return;
@@ -147,8 +174,7 @@ void cc_cmd(std::string &msg)
     }
     else
     {
-        std::string string_id =
-            msg.substr(msg.find("$id") + 3, msg.find("$cmd") - (msg.find("$id") + 3));
+        std::string string_id = msg.substr(msg.find("$id") + 3, msg.find("$cmd") - (msg.find("$id") + 3));
         int id;
         // Todo: Remove debug
         std::cout << "id:" << string_id << std::endl;
@@ -173,15 +199,24 @@ void cc_cmd(std::string &msg)
 
 void handleIRC(IRCMessage message, IRCClient *client)
 {
-    std::string &cmd     = message.command;
+    std::string &cmd = message.command;
+    try
+    {
+        message.parameters.at(0);
+        message.parameters.at(1);
+    }
+    catch (std::out_of_range)
+    {
+        logging::Info("Something is out of range");
+        return;
+    }
     std::string &channel = message.parameters.at(0);
     std::string &rawmsg  = message.parameters.at(1);
     std::string &usr     = message.prefix.nick;
     if (!ucccccp::validate(rawmsg))
         return;
     std::string msg(ucccccp::decrypt(rawmsg));
-    if (msg == "Attempt at ucccccping and failing" ||
-        msg == "Unsupported version")
+    if (msg == "Attempt at ucccccping and failing" || msg == "Unsupported version")
         return;
 
     // Handle privmsg (Message to #channel)
@@ -223,8 +258,7 @@ void updateData()
     std::string nick("Anon");
     if (!*anon)
         nick = g_ISteamFriends->GetPersonaName();
-    irc.UpdateData(nick, nick, *channel, *commandandcontrol_channel,
-                   *commandandcontrol_password, *address, *port);
+    irc.UpdateData(nick, nick, *channel, *commandandcontrol_channel, *commandandcontrol_password, *address, *port, *hacks::shared::catbot::catbotmode, g_ISteamUser->GetSteamID().GetAccountID());
 }
 
 bool sendmsg(std::string &msg, bool loopback)
@@ -250,8 +284,11 @@ void auth(bool reply)
     if (!*authenticate)
         return;
     MD5Value_t result;
-    MD5_ProcessSingleBuffer(&LOCAL_E->player_info.friendsID, sizeof(uint32),
-                            result);
+    player_info_s pinfo{};
+    if (!g_IEngine->GetPlayerInfo(LOCAL_E->m_IDX, &pinfo))
+        return;
+    std::string total_hash = std::to_string(pinfo.friendsID) + pinfo.name;
+    MD5_ProcessSingleBuffer(total_hash.c_str(), strlen(total_hash.c_str()), result);
     std::string msg("auth");
     if (reply)
         msg.append("rep");
@@ -270,43 +307,103 @@ Timer ircstate{};
 int GetMaxParty()
 {
     int partyable = 1;
-    auto peers = irc.getPeers();
+    auto peers    = irc.getPeers();
     for (auto peer : peers)
     {
-        if (peer.second.can_party)
-           partyable++;
+        if (peer.second.party_size != -1)
+            partyable++;
     }
     return partyable;
 }
-CatCommand debug_maxparty("debug_partysize", "Debug party size", [](){
-   logging::Info("%d", GetMaxParty());
+CatCommand debug_maxparty("debug_partysize", "Debug party size", []() { logging::Info("%d", GetMaxParty()); });
+CatCommand debug_steamids("debug_steamids", "Debug steamids", []() {
+    for (auto &i : irc.getPeers())
+        logging::Info("%u", i.second.steamid);
 });
-static HookedFunction paint(HookedFunctions_types::HF_Paint, "IRC", 16, []() {
+static Timer resize_party{};
+static Timer pass_leader{};
+
+void party_leader_pass()
+{
+    if (pass_leader.test_and_set(10000))
+    {
+        re::CTFGCClientSystem *gc = re::CTFGCClientSystem::GTFGCClientSystem();
+        re::CTFPartyClient *pc    = re::CTFPartyClient::GTFPartyClient();
+        if (gc && gc->BHaveLiveMatch() && pc->GetNumMembers() > 1)
+        {
+            CSteamID steamid;
+            pc->GetCurrentPartyLeader(steamid);
+            if (steamid.GetAccountID() == g_ISteamUser->GetSteamID().GetAccountID())
+            {
+                std::vector<unsigned int> valid_steam_ids = pc->GetPartySteamIDs();
+                bool found                                = false;
+                for (auto &peer : irc.getPeers())
+                {
+                    if (found)
+                        break;
+                    if (!peer.second.is_ingame)
+                    {
+                        for (auto &id : valid_steam_ids)
+                            if (id == peer.second.steamid)
+                            {
+                                CSteamID steam(id, EUniverse::k_EUniversePublic, EAccountType::k_EAccountTypeIndividual);
+                                pc->PromotePlayerToLeader(steam);
+                                found = true;
+                                break;
+                            }
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void run()
+{
     if (!restarting)
     {
-        if (last_sent_steamid.check(8000) && calledonce.test_and_set(2000))
+        auto party_client  = re::CTFPartyClient::GTFPartyClient();
+        int online_members = party_client->GetNumOnlineMembers();
+        int members        = party_client->GetNumMembers();
+
+        if (irc_party && resize_party.test_and_set(10000) && party_client && (online_members > *party_size || online_members < members))
         {
-            static uintptr_t addr = gSignatures.GetClientSignature("55 89 E5 57 56 53 83 EC ? 8B 7D ? 8B 77 ? 85 F6 0F 84");
-            typedef int (*GetNumOnlineMembers_t)(re::CTFPartyClient *);
-            auto GetNumOnlineMembers_fn = GetNumOnlineMembers_t(addr);
-            auto party_client = re::CTFPartyClient::GTFPartyClient();
-            int online_members = GetNumOnlineMembers_fn(party_client);
-            if (party_client && online_members != 6 && online_members < GetMaxParty())
+            int lowest_id = INT_MAX;
+            for (auto peer : irc.getPeers())
+            {
+                int id         = peer.first;
+                int party_size = peer.second.party_size;
+                if (party_size != online_members)
+                    continue;
+                if (id < lowest_id)
+                    lowest_id = id;
+            }
+            if (irc.getData().id < lowest_id)
                 hack::command_stack().push("tf_party_leave");
         }
-        if (last_steamid_received.test_and_set(10000))
+        if (last_sent_steamid.check(8000) && calledonce.test_and_set(2000) && online_members < *party_size)
         {
-            static uintptr_t addr = gSignatures.GetClientSignature(
-                "55 89 E5 57 56 53 83 EC ? 8B 7D ? 8B 77 ? 85 F6 0F 84");
-            typedef int (*GetNumOnlineMembers_t)(re::CTFPartyClient *);
-            auto GetNumOnlineMembers_fn = GetNumOnlineMembers_t(addr);
-            auto party_client           = re::CTFPartyClient::GTFPartyClient();
-            int online_members = GetNumOnlineMembers_fn(party_client);
-            if (party_client && online_members != 6 && online_members < GetMaxParty())
+            if (irc_party && !steamidvec.empty() && party_client && ((online_members != 6 && online_members < GetMaxParty()) || online_members != members))
+            {
+                steamidvec.push_back(g_ISteamUser->GetSteamID().GetAccountID());
+                int idx         = -1;
+                unsigned lowest = UINT_MAX;
+                for (int i = 0; i < steamidvec.size(); i++)
+                    if (steamidvec[i] < lowest)
+                    {
+                        lowest = steamidvec[i];
+                        idx    = i;
+                    }
+                if (idx != -1 && steamidvec[idx] != g_ISteamUser->GetSteamID().GetAccountID())
+                    hack::command_stack().push("tf_party_leave");
+            }
+        }
+        if (last_steamid_received.test_and_set(10000) && (online_members < *party_size || online_members < members))
+        {
+            if (party_client && ((online_members != 6 && online_members < GetMaxParty()) || online_members < members))
                 if (!steamidvec.empty())
                 {
-                    steamidvec.push_back(
-                        g_ISteamUser->GetSteamID().GetAccountID());
+                    steamidvec.push_back(g_ISteamUser->GetSteamID().GetAccountID());
                     int idx         = -1;
                     unsigned lowest = UINT_MAX;
                     for (int i = 0; i < steamidvec.size(); i++)
@@ -316,24 +413,32 @@ static HookedFunction paint(HookedFunctions_types::HF_Paint, "IRC", 16, []() {
                             idx    = i;
                         }
                     if (idx != -1 && steamidvec[idx] != g_ISteamUser->GetSteamID().GetAccountID())
+                    {
                         hack::command_stack().push(format("tf_party_request_join_user ", steamidvec[idx]));
+                    }
                     steamidvec.clear();
                 }
         }
-        if (irc_party && last_sent_steamid.test_and_set(*party_cooldown * 1000))
-            irc.privmsg(format("cc_partysteam",
-                               g_ISteamUser->GetSteamID().GetAccountID()),
-                        true);
+        if (irc_party && last_sent_steamid.test_and_set(*party_cooldown * 1000) && ((online_members < *party_size && online_members != 6) || online_members < members))
+            irc.privmsg(format("cc_partysteam", g_ISteamUser->GetSteamID().GetAccountID()), true);
         irc.Update();
         if (ircstate.test_and_set(20000))
         {
-            std::string nick("Anon");
-            if (!*anon)
-                nick = g_ISteamFriends->GetPersonaName();
-            irc.UpdateState(*irc_party && *answer_steam);
+            ChIRC::GameState state;
+            int size;
+            if (irc_party && answer_steam)
+                size = online_members;
+            else
+                size = -1;
+            state.party_size          = size;
+            re::CTFGCClientSystem *gc = re::CTFGCClientSystem::GTFGCClientSystem();
+            state.is_ingame           = gc && gc->BHaveLiveMatch();
+            irc.setState(state);
         }
+        if (transfer_leader_on_kick)
+            party_leader_pass();
     }
-});
+}
 
 template <typename T> void rvarCallback(settings::VariableBase<T> &var, T after)
 {
@@ -341,8 +446,7 @@ template <typename T> void rvarCallback(settings::VariableBase<T> &var, T after)
     {
         restarting = true;
         std::thread reload([]() {
-            std::this_thread::sleep_for(
-                std::chrono_literals::operator""ms(500));
+            std::this_thread::sleep_for(std::chrono_literals::operator""ms(500));
             irc.Disconnect();
             updateData();
             if (enabled)
@@ -354,6 +458,7 @@ template <typename T> void rvarCallback(settings::VariableBase<T> &var, T after)
 }
 
 static InitRoutine init([]() {
+    EC::Register(EC::Paint, run, "PAINT_irc", EC::average);
     updateData();
     enabled.installChangeCallback(rvarCallback<bool>);
     anon.installChangeCallback(rvarCallback<bool>);
@@ -368,33 +473,25 @@ static InitRoutine init([]() {
     irc.Connect();
 });
 
-static CatCommand irc_send_cmd("irc_send_cmd", "Send cmd to IRC",
-                               [](const CCommand &args) {
-                                   irc.sendraw(args.ArgS());
-                               });
-static CatCommand irc_exec_all("irc_exec_all", "Send command to C&C channel",
-                               [](const CCommand &args) {
-                                   std::string msg("cc_cmd$cmd");
-                                   msg.append(args.ArgS());
-                                   irc.privmsg(msg, true);
-                               });
+static CatCommand irc_send_cmd("irc_send_cmd", "Send cmd to IRC", [](const CCommand &args) { irc.sendraw(args.ArgS()); });
+static CatCommand irc_exec_all("irc_exec_all", "Send command to C&C channel", [](const CCommand &args) {
+    std::string msg("cc_cmd$cmd");
+    msg.append(args.ArgS());
+    irc.privmsg(msg, true);
+});
 
-static CatCommand invite_all(
-    "irc_invite_all", "Inivte all people in C&C channel",
-    [](const CCommand &args) {
-        std::string msg("cc_cmd$cmdtf_party_request_join_user ");
-        msg.append(std::to_string(g_ISteamUser->GetSteamID().GetAccountID()));
-        irc.privmsg(msg, true);
-    });
+static CatCommand invite_all("irc_invite_all", "Inivte all people in C&C channel", [](const CCommand &args) {
+    std::string msg("cc_cmd$cmdtf_party_request_join_user ");
+    msg.append(std::to_string(g_ISteamUser->GetSteamID().GetAccountID()));
+    irc.privmsg(msg, true);
+});
 
-static CatCommand irc_send("irc_send", "Send message to IRC",
-                           [](const CCommand &args) {
-                               std::string msg(args.ArgS());
-                               sendmsg(msg, true);
-                           });
+static CatCommand irc_send("irc_send", "Send message to IRC", [](const CCommand &args) {
+    std::string msg(args.ArgS());
+    sendmsg(msg, true);
+});
 
-static CatCommand irc_auth("irc_auth",
-                           "Auth via IRC (Find users on same server)",
-                           []() { auth(); });
+static CatCommand irc_auth("irc_auth", "Auth via IRC (Find users on same server)", []() { auth(); });
 
 } // namespace IRC
+#endif

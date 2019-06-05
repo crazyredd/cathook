@@ -8,10 +8,9 @@
 #include <settings/Registered.hpp>
 #include "common.hpp"
 
-static settings::Bool enable{ "announcer", "false" };
-
 namespace hacks::shared::announcer
 {
+static settings::Boolean enable{ "announcer", "false" };
 
 struct announcer_entry_s
 {
@@ -19,27 +18,11 @@ struct announcer_entry_s
     const std::string sound;
 };
 
-std::vector<announcer_entry_s> announces_headshot_combo = {
-    { 1, "headshot.wav" },
-    { 2, "headshot.wav" },
-    { 4, "hattrick.wav" },
-    { 6, "headhunter.wav" }
-};
+std::vector<announcer_entry_s> announces_headshot_combo = { { 1, "headshot.wav" }, { 2, "headshot.wav" }, { 4, "hattrick.wav" }, { 6, "headhunter.wav" } };
 
-std::vector<announcer_entry_s> announces_kill = {
-    { 5, "dominating.wav" },   { 7, "rampage.wav" },
-    { 9, "killingspree.wav" }, { 11, "monsterkill.wav" },
-    { 15, "unstoppable.wav" }, { 17, "ultrakill.wav" },
-    { 19, "godlike.wav" },     { 21, "wickedsick.wav" },
-    { 23, "impressive.wav" },  { 25, "ludicrouskill.wav" },
-    { 27, "holyshit.wav" }
-};
+std::vector<announcer_entry_s> announces_kill = { { 5, "dominating.wav" }, { 7, "rampage.wav" }, { 9, "killingspree.wav" }, { 11, "monsterkill.wav" }, { 15, "unstoppable.wav" }, { 17, "ultrakill.wav" }, { 19, "godlike.wav" }, { 21, "wickedsick.wav" }, { 23, "impressive.wav" }, { 25, "ludicrouskill.wav" }, { 27, "holyshit.wav" } };
 
-std::vector<announcer_entry_s> announces_kill_combo = { { 2, "doublekill.wav" },
-                                                        { 3, "triplekill.wav" },
-                                                        { 4, "multikill.wav" },
-                                                        { 5,
-                                                          "combowhore.wav" } };
+std::vector<announcer_entry_s> announces_kill_combo = { { 2, "doublekill.wav" }, { 3, "triplekill.wav" }, { 4, "multikill.wav" }, { 5, "combowhore.wav" } };
 
 unsigned killstreak{ 0 };
 unsigned killcombo{ 0 };
@@ -47,8 +30,7 @@ unsigned headshotcombo{ 0 };
 Timer last_kill{};
 Timer last_headshot{};
 
-const announcer_entry_s *
-find_entry(const std::vector<announcer_entry_s> &vector, int count)
+const announcer_entry_s *find_entry(const std::vector<announcer_entry_s> &vector, int count)
 {
     for (auto it = vector.rbegin(); it != vector.rend(); ++it)
     {
@@ -177,4 +159,9 @@ void shutdown()
 {
     g_IEventManager2->RemoveListener(&listener());
 }
+
+static InitRoutine EC([]() {
+    EC::Register(EC::Shutdown, shutdown, "shutdown_announcer", EC::average);
+    init();
+});
 } // namespace hacks::shared::announcer

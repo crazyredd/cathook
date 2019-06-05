@@ -1,8 +1,11 @@
 /*
   Created on 01.07.18.
 */
-
 #pragma once
+
+#include "config.h"
+
+#if ENABLE_VISUALS
 
 #include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_system.h>
@@ -44,8 +47,7 @@ public:
         }
         else if (string.find("Key ") != std::string::npos)
         {
-            key.scan = static_cast<SDL_Scancode>(
-                std::strtol(string.c_str() + 4, nullptr, 10));
+            key.scan = static_cast<SDL_Scancode>(std::strtol(string.c_str() + 4, nullptr, 10));
         }
         else
         {
@@ -126,8 +128,7 @@ protected:
                 string = "<null>";
             else
             {
-                const char *s =
-                    SDL_GetKeyName(SDL_GetKeyFromScancode(next.scan));
+                const char *s = SDL_GetKeyName(SDL_GetKeyFromScancode(next.scan));
                 if (!s || *s == 0)
                     string = "Key " + std::to_string(next.scan);
                 else
@@ -142,3 +143,64 @@ protected:
     Key value{};
 };
 } // namespace settings
+
+#else
+
+#include "Settings.hpp"
+
+namespace settings
+{
+
+struct Key
+{
+    int mouse{ 0 };
+};
+
+template <> class Variable<Key> : public VariableBase<Key>
+{
+public:
+    ~Variable() override = default;
+    VariableType getType() override
+    {
+        return VariableType::KEY;
+    }
+    // Valid inputs: "Mouse1", "Mouse5", "Key 6", "Key 10", "Key 2", "Space".
+    void fromString(const std::string &string) override
+    {
+    }
+    // Variable & causes segfault with gcc optimizations + these dont even
+    // return anything
+    void operator=(const std::string &string)
+    {
+        fromString(string);
+    }
+    inline const Key &operator*() override
+    {
+        return value;
+    }
+    inline const std::string &toString() override
+    {
+        return string;
+    }
+
+    inline explicit operator bool() const
+    {
+        return false;
+    }
+
+    inline bool isKeyDown() const
+    {
+        return false;
+    }
+
+protected:
+    void setInternal(Key next)
+    {
+        fireCallbacks(next);
+    }
+    Key value{};
+    std::string string{};
+};
+} // namespace settings
+
+#endif

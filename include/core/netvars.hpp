@@ -1,4 +1,4 @@
-/*
+﻿/*
  * entity.h
  *
  *  Created on: Oct 6, 2016
@@ -11,15 +11,7 @@
 
 class IClientEntity;
 
-// Fix clang gay
-#if defined(__clang__)
-#define NET_VAR(entity, offset, type)                                          \
-    (*(reinterpret_cast<type *>(reinterpret_cast<uint64_t>(entity) + (offset))))
-#elif defined(__GNUC__) || defined(__GNUG__)
-#define NET_VAR(entity, offset, type)                                          \
-    (*(reinterpret_cast<type *>(reinterpret_cast<uintptr_t>(entity) +          \
-                                (offset))))
-#endif
+#define NET_VAR(entity, offset, type) (*(reinterpret_cast<type *>(reinterpret_cast<uint64_t>(entity) + (offset))))
 
 #define NET_INT(entity, offset) NET_VAR(entity, offset, int)
 
@@ -64,15 +56,18 @@ public:
     offset_t flChargedDamage;
     offset_t iUpgradeLevel;
     offset_t m_hBuilder;
+    offset_t m_bCanPlace;
     offset_t m_iObjectType;
     offset_t m_bMiniBuilding;
     offset_t m_bHasSapper;
+    offset_t m_bPlacing;
     offset_t m_bBuilding;
     offset_t m_iTeleState;
     offset_t m_flTeleRechargeTime;
     offset_t m_flTeleCurrentRechargeDuration;
     offset_t m_iTeleTimesUsed;
     offset_t m_flTeleYawToExit;
+    offset_t m_bMatchBuilding;
     offset_t iPipeType;
     offset_t iBuildingHealth;
     offset_t iBuildingMaxHealth;
@@ -146,19 +141,37 @@ public:
     offset_t res_iScore;
     offset_t res_bAlive;
     offset_t m_nChargeResistType;
+    offset_t m_hHealingTarget;
     offset_t m_flChargeLevel;
 
     offset_t m_rgflCoordinateFrame;
     offset_t m_bFeignDeathReady;
     offset_t m_bCarryingObject;
+    offset_t m_hCarriedObject;
 
     offset_t m_iTauntConcept;
     offset_t m_iTauntIndex;
     offset_t m_angEyeAnglesLocal;
     offset_t m_nSequence;
     offset_t m_flSimulationTime;
+
     offset_t m_nStreaks_Player;
     offset_t m_nStreaks_Resource;
+    offset_t m_iPing_Resource;
+    offset_t m_iKills_Resource;
+    offset_t m_iDeaths_Resource;
+    offset_t m_iHealth_Resource;
+    offset_t m_iTotalScore_Resource;
+    offset_t m_iMaxHealth_Resource;
+    offset_t m_iMaxBuffedHealth_Resource;
+    offset_t m_iPlayerClass_Resource;
+    offset_t m_iActiveDominations_Resource;
+    offset_t m_flNextRespawnTime_Resource;
+    offset_t m_iDamage_Resource;
+    offset_t m_iDamageAssist_Resource;
+    offset_t m_iHealing_Resource;
+    offset_t m_iHealingAssist_Resource;
+    offset_t m_iPlayerLevel_Resource;
 };
 
 extern NetVars netvar;

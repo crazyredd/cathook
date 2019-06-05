@@ -7,14 +7,13 @@
 #include <menu/Debug.hpp>
 #include <menu/menu/special/SettingsManagerList.hpp>
 
-static settings::RVariable<glez::rgba> color_border{
-    "zk.style.input.select.border", "079797"
-};
+namespace zerokernel_select
+{
+static settings::RVariable<rgba_t> color_border{ "zk.style.input.select.border", "446498ff" };
 
-static settings::RVariable<int> default_width{ "zk.style.input.select.width",
-                                               "60" };
-static settings::RVariable<int> default_height{ "zk.style.input.select.height",
-                                                "14" };
+static settings::RVariable<int> default_width{ "zk.style.input.select.width", "60" };
+static settings::RVariable<int> default_height{ "zk.style.input.select.height", "14" };
+} // namespace zerokernel_select
 
 bool zerokernel::Select::onLeftMouseClick()
 {
@@ -37,8 +36,29 @@ void zerokernel::Select::render()
             }
         }
 
-        renderBorder(*color_border);
-        text.set(found ? found->name : "<?>");
+        renderBorder(*zerokernel_select::color_border);
+        std::string t;
+        if (found)
+        {
+            float x, y;
+            t = found->name;
+            resource::font::base.stringSize(t, &x, &y);
+            if (x + 5 > bb.getBorderBox().width)
+            {
+                while (true)
+                {
+                    resource::font::base.stringSize(t, &x, &y);
+                    if (x + 13 > bb.getBorderBox().width)
+                    {
+                        t = t.substr(0, t.size() - 1);
+                    }
+                    else
+                        break;
+                }
+                t.append("..");
+            }
+        }
+        text.set(found ? t : "<?>");
         text.render();
     }
     else
@@ -47,10 +67,9 @@ void zerokernel::Select::render()
     BaseMenuObject::render();
 }
 
-zerokernel::Select::Select(settings::IVariable &variable)
-    : BaseMenuObject(), variable(&variable)
+zerokernel::Select::Select(settings::IVariable &variable) : BaseMenuObject(), variable(&variable)
 {
-    resize(*default_width, *default_height);
+    resize(*zerokernel_select::default_width, *zerokernel_select::default_height);
     text.setParent(this);
     text.bb.width.setFill();
     text.bb.height.setFill();
@@ -59,7 +78,7 @@ zerokernel::Select::Select(settings::IVariable &variable)
 
 zerokernel::Select::Select() : BaseMenuObject{}
 {
-    resize(*default_width, *default_height);
+    resize(*zerokernel_select::default_width, *zerokernel_select::default_height);
     text.setParent(this);
     text.bb.width.setFill();
     text.bb.height.setFill();
@@ -72,17 +91,22 @@ void zerokernel::Select::openModal()
     object->setParent(Menu::instance->wm.get());
     object->move(bb.getBorderBox().x, bb.getBorderBox().y);
     object->addMessageHandler(*this);
-    object->resize(bb.getBorderBox().width, -1);
+    int size = bb.getBorderBox().width;
     for (auto &p : options)
     {
         object->addOption(p.name, p.value, p.tooltip);
+        float x, y;
+        resource::font::base.stringSize(p.name, &x, &y);
+        x += 10;
+        if (x > size)
+            size = x;
     }
+    object->resize(size, -1);
     debug::UiTreeGraph(object.get(), 0);
     Menu::instance->addModalObject(std::move(object));
 }
 
-void zerokernel::Select::handleMessage(zerokernel::Message &msg,
-                                       bool is_relayed)
+void zerokernel::Select::handleMessage(zerokernel::Message &msg, bool is_relayed)
 {
     if (variable && !is_relayed && msg.name == "OptionSelected")
         variable->fromString((std::string) msg.kv["value"]);
@@ -119,17 +143,12 @@ void zerokernel::Select::loadFromXml(const tinyxml2::XMLElement *data)
             const char *name;
             const char *value;
             const char *tooltip;
-            if (child->QueryStringAttribute("name", &name) ||
-                child->QueryStringAttribute("value", &value))
+            if (child->QueryStringAttribute("name", &name) || child->QueryStringAttribute("value", &value))
                 continue;
             printf("adding %s: %s\n", name, value);
-            auto has_tooltip =
-                !(child->QueryStringAttribute("tooltip", &tooltip));
-            options.push_back(option{ name, value,
-                                      has_tooltip
-                                          ? std::optional<std::string>(tooltip)
-                                          : std::nullopt });
-        };
+            auto has_tooltip = !(child->QueryStringAttribute("tooltip", &tooltip));
+            options.push_back(option{ name, value, has_tooltip ? std::optional<std::string>(tooltip) : std::nullopt });
+        }
         child = child->NextSiblingElement(nullptr);
     }
 }

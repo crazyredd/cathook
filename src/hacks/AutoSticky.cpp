@@ -6,16 +6,14 @@
  */
 
 #include "common.hpp"
-#include <hacks/AutoSticky.hpp>
 #include <PlayerTools.hpp>
 #include <settings/Bool.hpp>
 
-static settings::Bool enable{ "autosticky.enable", "false" };
-static settings::Bool buildings{ "autosticky.buildings", "true" };
-static settings::Bool legit{ "autosticky.legit", "false" };
-
 namespace hacks::tf::autosticky
 {
+static settings::Boolean enable{ "autosticky.enable", "false" };
+static settings::Boolean buildings{ "autosticky.buildings", "true" };
+static settings::Boolean legit{ "autosticky.legit", "false" };
 
 // A storage array for ents
 std::vector<CachedEntity *> bombs;
@@ -57,8 +55,7 @@ bool IsTarget(CachedEntity *ent)
             return false;
 
         // Global checks
-        if (player_tools::shouldTarget(ent) !=
-            player_tools::IgnoreReason::DO_NOT_IGNORE)
+        if (!player_tools::shouldTarget(ent))
             return false;
 
         IF_GAME(IsTF())
@@ -147,8 +144,7 @@ void CreateMove()
                     if (!legit)
                     {
                         // Aim at bomb
-                        AimAt(g_pLocalPlayer->v_Eye, bomb->m_vecOrigin(),
-                              current_user_cmd);
+                        AimAt(g_pLocalPlayer->v_Eye, bomb->m_vecOrigin(), current_user_cmd);
                         // Use silent
                         g_pLocalPlayer->bUseSilentAngles = true;
 
@@ -165,8 +161,7 @@ void CreateMove()
                     else if (VisCheckEntFromEnt(bomb, LOCAL_E))
                     {
                         // Aim at bomb
-                        AimAt(g_pLocalPlayer->v_Eye, bomb->m_vecOrigin(),
-                              current_user_cmd);
+                        AimAt(g_pLocalPlayer->v_Eye, bomb->m_vecOrigin(), current_user_cmd);
                         // Use silent
                         g_pLocalPlayer->bUseSilentAngles = true;
 
@@ -182,4 +177,6 @@ void CreateMove()
         }
     }
 }
+
+static InitRoutine EC([]() { EC::Register(EC::CreateMove, CreateMove, "auto_sticky", EC::average); });
 } // namespace hacks::tf::autosticky

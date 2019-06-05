@@ -1,24 +1,30 @@
-#include "hacks/LightESP.hpp"
+#include "config.h"
 #if ENABLE_VISUALS
-#include <glez/draw.hpp>
-#endif
-#include <settings/Bool.hpp>
-
-static settings::Bool enable{ "lightesp.enable", "false" };
+#include "common.hpp"
 
 namespace hacks::shared::lightesp
 {
+static settings::Boolean enable{ "lightesp.enable", "false" };
 
-Vector hitp[32];
-Vector minp[32];
-Vector maxp[32];
-bool drawEsp[32];
+static Vector hitp[32];
+static Vector minp[32];
+static Vector maxp[32];
+static bool drawEsp[32];
 
-#if ENABLE_VISUALS
-static HookedFunction cm(HF_CreateMove, "lightesp", 5, []() {
+rgba_t LightESPColor(CachedEntity *ent)
+{
+    if (!playerlist::IsDefault(ent))
+    {
+        return playerlist::Color(ent);
+    }
+    return colors::green;
+}
+
+static void cm()
+{
     if (!*enable)
         return;
-    for (int i = 1; i < g_IEngine->GetMaxClients(); i++)
+    for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
     {
         if (g_pLocalPlayer->entity_idx == i)
             continue;
@@ -28,8 +34,7 @@ static HookedFunction cm(HF_CreateMove, "lightesp", 5, []() {
             drawEsp[i] = false;
             continue;
         }
-        if (pEntity->m_iTeam() == LOCAL_E->m_iTeam() &&
-            playerlist::IsDefault(pEntity))
+        if (pEntity->m_iTeam() == LOCAL_E->m_iTeam() && playerlist::IsDefault(pEntity))
         {
             drawEsp[i] = false;
             continue;
@@ -41,15 +46,13 @@ static HookedFunction cm(HF_CreateMove, "lightesp", 5, []() {
         maxp[i]    = pEntity->hitboxes.GetHitbox(0)->max;
         drawEsp[i] = true;
     }
-});
-#endif
+}
 
 void draw()
 {
-#if ENABLE_VISUALS
     if (!enable)
         return;
-    for (int i = 1; i < g_IEngine->GetMaxClients(); i++)
+    for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
     {
         if (!drawEsp[i])
             continue;
@@ -63,24 +66,24 @@ void draw()
         {
             float size = 0.0f;
             Vector pout, pout2;
-            if (draw::WorldToScreen(minp[i], pout) &&
-                draw::WorldToScreen(maxp[i], pout2))
+            if (draw::WorldToScreen(minp[i], pout) && draw::WorldToScreen(maxp[i], pout2))
                 size = fmaxf(fabsf(pout2.x - pout.x), fabsf(pout2.y - pout.y));
 
-            glez::draw::rect(out.x, out.y, size / 4, size / 4,
-                             hacks::shared::lightesp::LightESPColor(pEntity));
+            float minsize = 20.0f;
+            if (size < minsize)
+                size = minsize;
+            draw::Rectangle(out.x - fabsf(pout.x - pout2.x) / 4, out.y - fabsf(pout.y - pout2.y) / 4, fabsf(pout.x - pout2.x) / 2, fabsf(pout.y - pout2.y) / 2, hacks::shared::lightesp::LightESPColor(pEntity));
+            draw::Rectangle(out.x - size / 8, out.y - size / 8, size / 4, size / 4, colors::red);
         }
     }
-#endif
 }
+
+static InitRoutine init([]() {
+    EC::Register(EC::CreateMove, cm, "cm_lightesp", EC::average);
 #if ENABLE_VISUALS
-rgba_t LightESPColor(CachedEntity *ent)
-{
-    if (!playerlist::IsDefault(ent))
-    {
-        return playerlist::Color(ent);
-    }
-    return colors::green;
-}
+    EC::Register(EC::Draw, draw, "draw_lightesp", EC::average);
 #endif
+});
+
 } // namespace hacks::shared::lightesp
+#endif

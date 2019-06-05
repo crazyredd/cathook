@@ -12,52 +12,69 @@
 #include <settings/Bool.hpp>
 
 #include "common.hpp"
+#include "hack.hpp"
+#include "MiscTemporary.hpp"
 
-settings::Bool log_to_console{ "hack.log-console", "false" };
+static settings::Boolean log_to_console{ "hack.log-console", "false" };
 
+static bool shut_down = false;
 FILE *logging::handle{ nullptr };
 
+#if ENABLE_LOGGING
 void logging::Initialize()
 {
     // FIXME other method of naming the file?
     passwd *pwd     = getpwuid(getuid());
-    logging::handle = fopen(
-        strfmt("/tmp/cathook-%s-%d.log", pwd->pw_name, getpid()).get(), "w");
+    logging::handle = fopen(strfmt("/tmp/cathook-%s-%d.log", pwd->pw_name, getpid()).get(), "w");
 }
+#endif
 
 void logging::Info(const char *fmt, ...)
 {
+#if ENABLE_LOGGING
+    if (shut_down)
+        return;
     if (logging::handle == nullptr)
         logging::Initialize();
-    char *buffer = new char[1024];
+
+    // Argument list
     va_list list;
     va_start(list, fmt);
-    vsprintf(buffer, fmt, list);
+    // Allocate buffer
+    auto result = std::make_unique<char[]>(512);
+    // Fill buffer
+    if (vsnprintf(result.get(), 512, fmt, list) < 0)
+        return;
     va_end(list);
-    size_t length = strlen(buffer);
-    char *result  = new char[length + 24];
+
+    std::string print_file(result.get());
+
     time_t current_time;
     struct tm *time_info = nullptr;
     char timeString[10];
     time(&current_time);
     time_info = localtime(&current_time);
     strftime(timeString, sizeof(timeString), "%H:%M:%S", time_info);
-    sprintf(result, "%% [%s] %s\n", timeString, buffer);
-    fprintf(logging::handle, "%s", result);
+
+    std::string to_log = result.get();
+    to_log             = strfmt("[%s] ", timeString).get() + to_log + "\n";
+    fprintf(logging::handle, "%s", to_log.c_str());
     fflush(logging::handle);
 #if ENABLE_VISUALS
-    if (g_ICvar)
+    if (!hack::shutdown)
     {
         if (*log_to_console)
-            g_ICvar->ConsolePrintf("%s", result);
+            g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "CAT: %s\n", result.get());
     }
 #endif
-    delete[] buffer;
-    delete[] result;
+#endif
 }
 
 void logging::Shutdown()
 {
+#if ENABLE_LOGGING
     fclose(logging::handle);
     logging::handle = nullptr;
+    shut_down       = true;
+#endif
 }

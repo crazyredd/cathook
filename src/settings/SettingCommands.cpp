@@ -7,24 +7,26 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <thread>
-
+#include <MiscTemporary.hpp>
 /*
   Created on 29.07.18.
 */
+
+namespace settings::commands {
 
 static void getAndSortAllConfigs();
 
 static CatCommand cat("cat", "", [](const CCommand &args) {
     if (args.ArgC() < 3)
     {
-        g_ICvar->ConsolePrintf("Usage: cat <set/get> <variable> [value]\n");
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "Usage: cat <set/get> <variable> [value]\n");
         return;
     }
 
     auto variable = settings::Manager::instance().lookup(args.Arg(2));
     if (variable == nullptr)
     {
-        g_ICvar->ConsolePrintf("Variable not found: %s\n", args.Arg(2));
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "Variable not found: %s\n", args.Arg(2));
         return;
     }
 
@@ -32,30 +34,26 @@ static CatCommand cat("cat", "", [](const CCommand &args) {
     {
         if (args.ArgC() < 4)
         {
-            g_ICvar->ConsolePrintf("Usage: cat <set> <variable> <value>\n");
+            g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "Usage: cat <set> <variable> <value>\n");
             return;
         }
         variable->fromString(args.Arg(3));
-        g_ICvar->ConsolePrintf("%s = \"%s\"\n", args.Arg(2),
-                               variable->toString().c_str());
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "%s = \"%s\"\n", args.Arg(2), variable->toString().c_str());
         return;
     }
     else if (!strcmp(args.Arg(1), "get"))
     {
-        g_ICvar->ConsolePrintf("%s = \"%s\"\n", args.Arg(2),
-                               variable->toString().c_str());
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "%s = \"%s\"\n", args.Arg(2), variable->toString().c_str());
         return;
     }
     else
     {
-        g_ICvar->ConsolePrintf("Usage: cat <set/get> <variable> <value>\n");
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "Usage: cat <set/get> <variable> <value>\n");
         return;
     }
 });
 
-void save_thread(const int ArgC, const std::string ArgS)
-{
-    std::this_thread::sleep_for(std::chrono_literals::operator""s(1));
+static CatCommand save("save", "", [](const CCommand &args) {
     settings::SettingsWriter writer{ settings::Manager::instance() };
 
     DIR *config_directory = opendir(DATA_PATH "/configs");
@@ -65,86 +63,33 @@ void save_thread(const int ArgC, const std::string ArgS)
         mkdir(DATA_PATH "/configs", S_IRWXU | S_IRWXG);
     }
 
-    if (ArgC == 1)
+    if (args.ArgC() == 1)
     {
-        writer.saveTo(DATA_PATH "/configs/default.conf", false);
+        writer.saveTo(DATA_PATH "/configs/default.conf");
     }
     else
     {
-        writer.saveTo(std::string(DATA_PATH "/configs/") + ArgS + ".conf",
-                      false);
+        writer.saveTo(std::string(DATA_PATH "/configs/") + args.ArgS() + ".conf");
     }
     logging::Info("cat_save: Sorting configs...");
     getAndSortAllConfigs();
     logging::Info("cat_save: Closing dir...");
     closedir(config_directory);
-    logging::Info("cat_save: Enabeling cathook...");
-    settings::RVarLock.store(false);
-}
-
-static CatCommand save("save", "", [](const CCommand &args) {
-    if (!settings::RVarLock.load())
-    {
-        settings::RVarLock.store(true);
-        std::thread loader;
-        if (args.ArgC() == 1)
-        {
-            std::string string;
-            loader = std::thread(save_thread, 1, string);
-        }
-        else
-        {
-            loader = std::thread(save_thread, args.ArgC(), args.Arg(1));
-        }
-        loader.detach();
-    }
 });
 
-void load_thread(const int ArgC, const std::string ArgS)
-{
-    std::this_thread::sleep_for(std::chrono_literals::operator""s(1));
+static CatCommand load("load", "", [](const CCommand &args) {
     settings::SettingsReader loader{ settings::Manager::instance() };
-    if (ArgC == 1)
+    if (args.ArgC() == 1)
     {
         loader.loadFrom(DATA_PATH "/configs/default.conf");
     }
     else
     {
-#if ENABLE_VISUALS
+        std::string backup = args.ArgS();
+        std::string ArgS   = backup;
+        ArgS.erase(std::remove(ArgS.begin(), ArgS.end(), '\n'), ArgS.end());
+        ArgS.erase(std::remove(ArgS.begin(), ArgS.end(), '\r'), ArgS.end());
         loader.loadFrom(std::string(DATA_PATH "/configs/") + ArgS + ".conf");
-#else
-        for (int i = 0;; i++)
-        {
-            if (loader.loadFrom(std::string(DATA_PATH "/configs/") + ArgS +
-                                ".conf"))
-                break;
-            if (i > 5)
-            {
-                logging::Info("cat_load: Force crash. Couldn't load config!");
-                std::terminate();
-            }
-            std::this_thread::sleep_for(std::chrono_literals::operator""s(3));
-        }
-#endif
-    }
-    settings::RVarLock.store(false);
-}
-
-static CatCommand load("load", "", [](const CCommand &args) {
-    if (!settings::RVarLock.load())
-    {
-        settings::RVarLock.store(true);
-        std::thread saver;
-        if (args.ArgC() == 1)
-        {
-            std::string string;
-            saver = std::thread(load_thread, 1, string);
-        }
-        else
-        {
-            saver = std::thread(load_thread, args.ArgC(), args.Arg(1));
-        }
-        saver.detach();
     }
 });
 
@@ -190,9 +135,39 @@ static void getAndSortAllConfigs()
     logging::Info("Sorted %u config files\n", sortedConfigs.size());
 }
 
-static int cat_completionCallback(
-    const char *c_partial,
-    char commands[COMMAND_COMPLETION_MAXITEMS][COMMAND_COMPLETION_ITEM_LENGTH])
+static CatCommand cat_find("find", "Find a command by name", [](const CCommand &args) {
+    // We need arguments
+    if (args.ArgC() < 2)
+        return logging::Info("Usage: cat_find (name)");
+    // Store all found rvars
+    std::vector<std::string> found_rvars;
+    for (const auto &s : sortedVariables)
+    {
+        // Store std::tolower'd rvar
+        std::string lowered_str;
+        for (auto &i : s)
+            lowered_str += std::tolower(i);
+        std::string to_find = args.Arg(1);
+        // store rvar to find in lowercase too
+        std::string to_find_lower;
+        for (auto &s : to_find)
+            to_find_lower += std::tolower(s);
+        // If it matches then add to vector
+        if (lowered_str.find(to_find_lower) != lowered_str.npos)
+            found_rvars.push_back(s);
+    }
+    // Yes
+    g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "Found rvars:\n");
+    // Nothing found :C
+    if (found_rvars.empty())
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "No rvars found.\n");
+    // Found rvars
+    else
+        for (auto &s : found_rvars)
+            g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "%s\n", s.c_str());
+});
+
+static int cat_completionCallback(const char *c_partial, char commands[COMMAND_COMPLETION_MAXITEMS][COMMAND_COMPLETION_ITEM_LENGTH])
 {
     std::string partial = c_partial;
     std::array<std::string, 2> parts{};
@@ -222,17 +197,14 @@ static int cat_completionCallback(
     // "g" -> cat get
     // "get " -> cat get <variable>
 
-    logging::Info("%s|%s", parts.at(0).c_str(), parts.at(1).c_str());
+    // logging::Info("%s|%s", parts.at(0).c_str(), parts.at(1).c_str());
 
-    if (parts.at(0).empty() ||
-        parts.at(1).empty() && (!parts.at(0).empty() && partial.back() != ' '))
+    if (parts.at(0).empty() || parts.at(1).empty() && (!parts.at(0).empty() && partial.back() != ' '))
     {
         if (std::string("get").find(parts.at(0)) != std::string::npos)
-            snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH,
-                     "cat get ");
+            snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH, "cat get ");
         if (std::string("set").find(parts[0]) != std::string::npos)
-            snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH,
-                     "cat set ");
+            snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH, "cat set ");
         return count;
     }
 
@@ -243,9 +215,10 @@ static int cat_completionCallback(
             auto variable = settings::Manager::instance().lookup(s);
             if (variable)
             {
-                snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH - 1,
-                         "cat %s %s %s", parts.at(0).c_str(), s.c_str(),
-                         variable->toString().c_str());
+                if (s.compare(parts.at(1)))
+                    snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH - 1, "cat %s %s", parts.at(0).c_str(), s.c_str());
+                else
+                    snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH - 1, "cat %s %s %s", parts.at(0).c_str(), s.c_str(), variable->toString().c_str());
                 if (count == COMMAND_COMPLETION_MAXITEMS)
                     break;
             }
@@ -254,9 +227,7 @@ static int cat_completionCallback(
     return count;
 }
 
-static int load_completionCallback(
-    const char *c_partial,
-    char commands[COMMAND_COMPLETION_MAXITEMS][COMMAND_COMPLETION_ITEM_LENGTH])
+static int load_CompletionCallback(const char *c_partial, char commands[COMMAND_COMPLETION_MAXITEMS][COMMAND_COMPLETION_ITEM_LENGTH])
 {
     std::string partial = c_partial;
     std::array<std::string, 2> parts{};
@@ -286,8 +257,45 @@ static int load_completionCallback(
     {
         if (s.find(parts.at(0)) == 0)
         {
-            snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH - 1,
-                     "cat_load %s", s.c_str());
+            snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH - 1, "cat_load %s", s.c_str());
+            if (count == COMMAND_COMPLETION_MAXITEMS)
+                break;
+        }
+    }
+    return count;
+}
+
+static int save_CompletionCallback(const char *c_partial, char commands[COMMAND_COMPLETION_MAXITEMS][COMMAND_COMPLETION_ITEM_LENGTH])
+{
+    std::string partial = c_partial;
+    std::array<std::string, 2> parts{};
+    auto j    = 0u;
+    auto f    = false;
+    int count = 0;
+
+    for (auto i = 0u; i < partial.size() && j < 3; ++i)
+    {
+        auto space = (bool) isspace(partial.at(i));
+        if (!space)
+        {
+            if (j)
+                parts.at(j - 1).push_back(partial[i]);
+            f = true;
+        }
+
+        if (i == partial.size() - 1 || (f && space))
+        {
+            if (space)
+                ++j;
+            f = false;
+        }
+    }
+
+    for (const auto &s : sortedConfigs)
+    {
+        if (s.find(parts.at(0)) == 0)
+        {
+            snprintf(commands[count++], COMMAND_COMPLETION_ITEM_LENGTH - 1, "cat_save %s", s.c_str());
             if (count == COMMAND_COMPLETION_MAXITEMS)
                 break;
         }
@@ -301,5 +309,8 @@ static InitRoutine init([]() {
     cat.cmd->m_bHasCompletionCallback  = true;
     cat.cmd->m_fnCompletionCallback    = cat_completionCallback;
     load.cmd->m_bHasCompletionCallback = true;
-    load.cmd->m_fnCompletionCallback   = load_completionCallback;
+    load.cmd->m_fnCompletionCallback   = load_CompletionCallback;
+    save.cmd->m_bHasCompletionCallback = true;
+    save.cmd->m_fnCompletionCallback   = save_CompletionCallback;
 });
+}

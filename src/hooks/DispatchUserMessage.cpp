@@ -10,254 +10,261 @@
 #include <hacks/AntiAim.hpp>
 #include <settings/Bool.hpp>
 #include "HookedMethods.hpp"
+#include "CatBot.hpp"
 
-static settings::Bool clean_chat{ "chat.clean", "false" };
-static settings::Bool dispatch_log{ "debug.log-dispatch-user-msg", "false" };
-static settings::Bool chat_filter_enable{ "chat.censor.enable", "false" };
-static settings::Bool identify{ "chat.identify", "false" };
-static settings::Bool answerIdentify{ "chat.identify.answer", "false" };
+static settings::Boolean clean_chat{ "chat.clean", "false" };
+static settings::Boolean dispatch_log{ "debug.log-dispatch-user-msg", "false" };
+static settings::Boolean chat_filter_enable{ "chat.censor.enable", "false" };
+static settings::Boolean identify{ "chat.identify", "false" };
+static settings::Boolean answerIdentify{ "chat.identify.answer", "false" };
+static settings::Boolean anti_votekick{ "cat-bot.anti-autobalance", "false" };
 
 static bool retrun = false;
-static Timer sendmsg{};
 static Timer gitgud{};
 
 // Using repeated char causes crash on some systems. Suboptimal solution.
-const static std::string clear(
-    "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
-    "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
-    "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
-    "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
-    "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
-    "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
-    "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+const static std::string clear("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                               "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                               "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                               "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                               "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                               "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                               "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
 std::string lastfilter{};
 std::string lastname{};
 
 namespace hooked_methods
 {
-std::vector<std::string> SplitName(std::string name, int num)
+static Timer sendmsg{};
+template <typename T> void SplitName(std::vector<T> &ret, const T &name, int num)
 {
-    std::string tmp{};
-    std::vector<std::string> name2{};
+    T tmp;
     int chars = 0;
     for (char i : name)
     {
         if (i == ' ')
             continue;
-        if (chars == num)
+
+        tmp.push_back(std::tolower(i));
+        ++chars;
+        if (chars == num + 1)
         {
             chars = 0;
-            tmp += i;
-            name2.push_back(tmp);
-            tmp = "";
-        }
-        else if (chars < num)
-        {
-            chars++;
-            tmp += i;
+            ret.push_back(tmp);
+            tmp.clear();
         }
     }
     if (tmp.size() > 2)
-        name2.push_back(tmp);
-    for (auto &i : name2)
-        boost::to_lower(i);
-    return name2;
+        ret.push_back(tmp);
 }
-DEFINE_HOOKED_METHOD(DispatchUserMessage, bool, void *this_, int type,
-                     bf_read &buf)
+static int anti_balance_attempts = 0;
+static std::string previous_name = "";
+static Timer reset_it{};
+static Timer wait_timer{};
+void Paint()
+{
+    if (!wait_timer.test_and_set(1000))
+        return;
+    INetChannel *server = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    if (server)
+        reset_it.update();
+    if (reset_it.test_and_set(20000))
+    {
+        anti_balance_attempts = 0;
+        previous_name         = "";
+    }
+}
+static InitRoutine Autobalance([]() { EC::Register(EC::Paint, Paint, "paint_autobalance", EC::average); });
+DEFINE_HOOKED_METHOD(DispatchUserMessage, bool, void *this_, int type, bf_read &buf)
 {
     if (!isHackActive())
         return original::DispatchUserMessage(this_, type, buf);
+
+    int s, i, j;
+    char c;
+    const char *buf_data = reinterpret_cast<const char *>(buf.m_pData);
+
+    /* Delayed print of name and message, censored by chat_filter
+     * TO DO: Document type 47
+     */
     if (retrun && type != 47 && gitgud.test_and_set(300))
     {
-        PrintChat("\x07%06X%s\x01: %s", 0xe05938, lastname.c_str(),
-                  lastfilter.c_str());
+        PrintChat("\x07%06X%s\x01: %s", 0xe05938, lastname.c_str(), lastfilter.c_str());
         retrun = false;
     }
-    int loop_index, s, i, j;
-    char *data, c;
-    if (type == 5)
-        if (buf.GetNumBytesLeft() > 35)
-        {
-            std::string message_name{};
-            for (int i = 0; i < buf.GetNumBytesLeft(); i++)
-            {
-                int byte = buf.ReadByte();
-                message_name.push_back(byte);
-            }
-            if (message_name.find("#TF_Autobalance_TeamChangePending") !=
-                std::string::npos)
-                logging::Info("test, %d %d", int(message_name[0]),
-                              (CE_GOOD(LOCAL_E) ? LOCAL_E->m_IDX : -1));
-        }
-    if (type == 4)
+    std::string data;
+    switch (type)
     {
-        loop_index = 0;
-        s          = buf.GetNumBytesLeft();
-        if (s < 256)
+
+    case 12:
+        if (hacks::shared::catbot::anti_motd && hacks::shared::catbot::catbotmode)
         {
-            data = (char *) alloca(s);
-            for (i = 0; i < s; i++)
-                data[i] = buf.ReadByte();
-            j = 0;
-            std::string name{};
-            std::string message{};
-            for (i = 0; i < 3; i++)
-            {
-                while ((c = data[j++]) && (loop_index < s))
-                {
-                    loop_index++;
-                    if (clean_chat)
-                    {
-                        if ((c == '\n' || c == '\r') && (i == 1 || i == 2))
-                            data[j - 1] = '\0';
-                    }
-                    if (i == 1)
-                        name.push_back(c);
-                    if (i == 2)
-                        message.push_back(c);
-                }
-            }
-            if (chat_filter_enable && data[0] != LOCAL_E->m_IDX)
-            {
-                player_info_s info{};
-                g_IEngine->GetPlayerInfo(LOCAL_E->m_IDX, &info);
-                std::string name1 = info.name;
-                std::vector<std::string> name2{};
-                std::string claz{};
-
-                switch (g_pLocalPlayer->clazz)
-                {
-                case tf_scout:
-                    claz = "scout";
-                    break;
-                case tf_soldier:
-                    claz = "soldier";
-                    break;
-                case tf_pyro:
-                    claz = "pyro";
-                    break;
-                case tf_demoman:
-                    claz = "demo";
-                    break;
-                case tf_engineer:
-                    claz = "engi";
-                    break;
-                case tf_heavy:
-                    claz = "heavy";
-                    break;
-                case tf_medic:
-                    claz = "med";
-                    break;
-                case tf_sniper:
-                    claz = "sniper";
-                    break;
-                case tf_spy:
-                    claz = "spy";
-                    break;
-                default:
-                    break;
-                }
-
-                std::vector<std::string> res = {
-                    "skid", "script", "cheat", "hak",   "hac",  "f1",
-                    "hax",  "vac",    "ban",   "lmao",  "bot",  "report",
-                    "cat",  "insta",  "revv",  "brass", "kick", claz
-                };
-                name2 = SplitName(name1, 2);
-                for (auto i : name2)
-                    res.push_back(i);
-                name2 = SplitName(name1, 3);
-                for (auto i : name2)
-                    res.push_back(i);
-                std::string message2 = message;
-                std::vector<std::string> toreplace{ " ", "4", "3", "0",
-                                                    "6", "5", "7" };
-                std::vector<std::string> replacewith{ "",  "a", "e", "o",
-                                                      "g", "s", "t" };
-                boost::to_lower(message2);
-
-                for (int i = 0; i < toreplace.size(); i++)
-                    boost::replace_all(message2, toreplace[i], replacewith[i]);
-                bool filtered = false;
-                for (auto filter : res)
-                    if (boost::contains(message2, filter) && !filtered)
-                    {
-                        filtered = true;
-                        chat_stack::Say("." + clear, true);
-                        retrun     = true;
-                        lastfilter = format(filter);
-                        lastname   = format(name);
-                        gitgud.update();
-                    }
-            }
-#if !LAGBOT_MODE
-            if (*identify && sendmsg.test_and_set(300000))
-                chat_stack::Say("!!meow");
-#endif
-            if (crypt_chat)
-            {
-                if (message.find("!!B") == 0)
-                {
-                    if (ucccccp::validate(message))
-                    {
-                        std::string msg = ucccccp::decrypt(message);
-#if !LAGBOT_MODE
-                        //                        if (ucccccp::decrypt(message)
-                        //                        == "meow" &&
-                        //                            hacks::shared::antiaim::communicate
-                        //                            && data[0] !=
-                        //                            LOCAL_E->m_IDX &&
-                        //                            playerlist::AccessData(ENTITY(data[0])).state
-                        //                            !=
-                        //                                playerlist::k_EState::CAT)
-                        //                        {
-                        //                            playerlist::AccessData(ENTITY(data[0])).state
-                        //                            =
-                        //                                playerlist::k_EState::CAT;
-                        //                            chat_stack::Say("!!meow");
-                        //                        }
-                        CachedEntity *ent = ENTITY(data[0]);
-                        if (msg != "Attempt at ucccccping and failing" &&
-                            msg != "Unsupported version" && ent != LOCAL_E)
-                        {
-                            auto &state = playerlist::AccessData(ent).state;
-                            if (state == playerlist::k_EState::DEFAULT)
-                            {
-                                state = playerlist::k_EState::CAT;
-                                if (*answerIdentify &&
-                                    sendmsg.test_and_set(5000))
-                                    chat_stack::Say("!!meow");
-                            }
-                            else if (state == playerlist::k_EState::CAT)
-                            {
-                                if (*answerIdentify &&
-                                    sendmsg.test_and_set(60000))
-                                    chat_stack::Say("!!meow");
-                            }
-                        }
-#endif
-                        PrintChat("\x07%06X%s\x01: %s", 0xe05938, name.c_str(),
-                                  msg.c_str());
-                    }
-                }
-            }
-            chatlog::LogMessage(data[0], message);
-            buf = bf_read(data, s);
-            buf.Seek(0);
+            data = std::string(buf_data);
+            if (data.find("class_") != data.npos)
+                return false;
         }
+        break;
+    case 5:
+        if (*anti_votekick && buf.GetNumBytesLeft() > 35)
+        {
+            INetChannel *server = (INetChannel *) g_IEngine->GetNetChannelInfo();
+            data                = std::string(buf_data);
+            logging::Info("%s", data.c_str());
+            if (data.find("TeamChangeP") != data.npos && CE_GOOD(LOCAL_E))
+            {
+                std::string server_name(server->GetAddress());
+                if (server_name != previous_name)
+                {
+                    previous_name         = server_name;
+                    anti_balance_attempts = 0;
+                }
+                if (anti_balance_attempts < 2)
+                    g_IEngine->ClientCmd_Unrestricted("killserver;wait 100;cat_mm_join");
+                else
+                {
+                    std::string autobalance_msg = "tf_party_chat \"autobalanced in 3 seconds";
+                    if (ipc::peer && ipc::peer->connected)
+                        autobalance_msg += format(" IPC ID ", ipc::peer->client_id, "\"");
+                    else
+                        autobalance_msg += "\"";
+                    g_IEngine->ClientCmd_Unrestricted(autobalance_msg.c_str());
+                }
+                anti_balance_attempts++;
+            }
+        }
+        break;
+    case 4:
+        s = buf.GetNumBytesLeft();
+        if (s >= 256 || CE_BAD(LOCAL_E))
+            break;
+
+        for (i = 0; i < s; i++)
+        {
+            c = buf_data[i];
+            if (clean_chat && i > 1)
+                if (c == '\n' || c == '\r')
+                    continue;
+
+            data.push_back(c);
+        }
+        /* First byte is player ENT index
+         * Second byte is unindentified (equals to 0x01)
+         */
+        const char *p = data.c_str() + 2;
+        std::string event(p), name((p += event.size() + 1)), message(p + name.size() + 1);
+        if (chat_filter_enable && data[0] == LOCAL_E->m_IDX && event == "#TF_Name_Change")
+        {
+            chat_stack::Say("\e" + clear, false);
+        }
+        else if (chat_filter_enable && data[0] != LOCAL_E->m_IDX && event.find("TF_Chat") == 0)
+        {
+            player_info_s info{};
+            g_IEngine->GetPlayerInfo(LOCAL_E->m_IDX, &info);
+            const char *claz  = nullptr;
+            std::string name1 = info.name;
+
+            switch (g_pLocalPlayer->clazz)
+            {
+            case tf_scout:
+                claz = "scout";
+                break;
+            case tf_soldier:
+                claz = "soldier";
+                break;
+            case tf_pyro:
+                claz = "pyro";
+                break;
+            case tf_demoman:
+                claz = "demo";
+                break;
+            case tf_engineer:
+                claz = "engi";
+                break;
+            case tf_heavy:
+                claz = "heavy";
+                break;
+            case tf_medic:
+                claz = "med";
+                break;
+            case tf_sniper:
+                claz = "sniper";
+                break;
+            case tf_spy:
+                claz = "spy";
+                break;
+            default:
+                break;
+            }
+
+            std::vector<std::string> res = { "skid", "script", "cheat", "hak", "hac", "f1", "hax", "vac", "ban", "bot", "report", "kick" };
+            if (claz)
+                res.emplace_back(claz);
+
+            SplitName(res, name1, 2);
+            SplitName(res, name1, 3);
+
+            std::string message2(message);
+            boost::to_lower(message2);
+
+            const char *toreplace[]   = { " ", "4", "3", "0", "6", "5", "7" };
+            const char *replacewith[] = { "", "a", "e", "o", "g", "s", "t" };
+
+            for (int i = 0; i < 7; i++)
+                boost::replace_all(message2, toreplace[i], replacewith[i]);
+
+            for (auto filter : res)
+                if (boost::contains(message2, filter))
+                {
+                    chat_stack::Say("\e" + clear, true);
+                    retrun     = true;
+                    lastfilter = message;
+                    lastname   = format(name);
+                    gitgud.update();
+                    break;
+                }
+        }
+        if (crypt_chat && message.find("!!B") == 0 && ucccccp::validate(message))
+        {
+            std::string msg   = ucccccp::decrypt(message);
+            CachedEntity *ent = ENTITY(data[0]);
+            if (msg != "Attempt at ucccccping and failing" && msg != "Unsupported version" && ent != LOCAL_E)
+            {
+                auto &state = playerlist::AccessData(ent).state;
+                if (state == playerlist::k_EState::DEFAULT)
+                {
+                    state = playerlist::k_EState::CAT;
+                }
+            }
+            PrintChat("\x07%06X%s\x01: %s", 0xe05938, name.c_str(), msg.c_str());
+        }
+        chatlog::LogMessage(data[0], message);
+        buf = bf_read(data.c_str(), data.size());
+        buf.Seek(0);
+        break;
     }
     if (dispatch_log)
     {
         logging::Info("D> %i", type);
-        std::ostringstream str{};
+        std::ostringstream str;
+        while (buf.GetNumBytesLeft())
+            str << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(buf.ReadByte()) << ' ';
+
+        std::string msg(str.str());
+        logging::Info("MESSAGE %d, DATA = [ %s ] strings listed below", type, msg.c_str());
+        buf.Seek(0);
+
+        i = 0;
+        msg.clear();
         while (buf.GetNumBytesLeft())
         {
-            unsigned char byte = buf.ReadByte();
-            str << std::hex << std::setw(2) << std::setfill('0')
-                << static_cast<int>(byte) << ' ';
+            if ((c = buf.ReadByte()))
+                msg.push_back(c);
+            else
+            {
+                logging::Info("[%d] %s", i++, msg.c_str());
+                msg.clear();
+            }
         }
-        logging::Info("MESSAGE %d, DATA = [ %s ]", type, str.str().c_str());
         buf.Seek(0);
     }
     votelogger::dispatchUserMessage(buf, type);

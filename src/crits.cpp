@@ -8,36 +8,20 @@
 #include <settings/Bool.hpp>
 #include "common.hpp"
 
-static settings::Bool crit_info{ "crit.info", "false" };
-static settings::Button crit_key{ "crit.key", "<null>" };
-static settings::Bool crit_melee{ "crit.melee", "false" };
-static settings::Bool crit_legiter{ "crit.force-gameplay", "false" };
-static settings::Bool crit_experimental{ "crit.experimental", "false" };
-
 std::unordered_map<int, int> command_number_mod{};
-
-int *g_PredictionRandomSeed = nullptr;
 
 namespace criticals
 {
-CatCommand test("crit_debug_print", "debug", []() {
-    if (CE_BAD(LOCAL_E))
-        return;
-    if (CE_BAD(LOCAL_W))
-        return;
-    unsigned unk1           = *(unsigned *) (RAW_ENT(LOCAL_W) + 2832);
-    unsigned unk2           = *(unsigned *) (RAW_ENT(LOCAL_W) + 2820);
-    unsigned char CritSlots = *(unsigned char *) (unk1 + (unk2 << 6) + 1844);
-    int CritSlots2          = *(unsigned *) (unk1 + (unk2 << 6) + 1788);
-    unsigned CritSlots3     = *(unsigned *) (unk1 + (unk2 << 6) + 1788);
-    int CritSlots4          = *(int *) (unk1 + (unk2 << 6) + 1788);
-    logging::Info("%u %d %d %u %d", unk1, int(CritSlots), CritSlots2,
-                  CritSlots3, CritSlots4);
-});
+
+static settings::Boolean crit_info{ "crit.info", "false" };
+static settings::Button crit_key{ "crit.key", "<null>" };
+static settings::Boolean crit_melee{ "crit.melee", "false" };
+static settings::Boolean crit_legiter{ "crit.force-gameplay", "false" };
+static settings::Boolean crit_experimental{ "crit.experimental", "false" };
+
 int find_next_random_crit_for_weapon(IClientEntity *weapon)
 {
-    int tries = 0, number = current_user_cmd->command_number, found = 0, seed,
-        seed_md5, seed_backup;
+    int tries = 0, number = current_user_cmd->command_number, found = 0, seed_backup;
 
     crithack_saved_state state{};
     state.Save(weapon);
@@ -45,10 +29,8 @@ int find_next_random_crit_for_weapon(IClientEntity *weapon)
     seed_backup = *g_PredictionRandomSeed;
     while (!found && tries < 4096)
     {
-        seed_md5                = MD5_PseudoRandom(number) & 0x7FFFFFFF;
-        *g_PredictionRandomSeed = seed_md5;
-        seed  = seed_md5 ^ (LOCAL_E->m_IDX | (LOCAL_W->m_IDX << 8));
-        found = re::C_TFWeaponBase::CalcIsAttackCritical(weapon);
+        *g_PredictionRandomSeed = MD5_PseudoRandom(number) & 0x7FFFFFFF;
+        found                   = re::C_TFWeaponBase::CalcIsAttackCritical(weapon);
         if (found)
             break;
         ++tries;
@@ -56,7 +38,8 @@ int find_next_random_crit_for_weapon(IClientEntity *weapon)
     }
 
     *g_PredictionRandomSeed = seed_backup;
-    state.Load(weapon);
+    if (!crit_experimental || g_pLocalPlayer->weapon_mode == weaponmode::weapon_melee)
+        state.Load(weapon);
     if (found)
         return number;
     return 0;
@@ -92,7 +75,7 @@ struct cached_calculation_s
     int weapon_entity;
 };
 
-cached_calculation_s cached_calculation{};
+static cached_calculation_s cached_calculation{};
 
 static int number                = 0;
 static int lastnumber            = 0;
@@ -103,42 +86,40 @@ bool force_crit(IClientEntity *weapon)
 {
     auto command_number = current_user_cmd->command_number;
 
-    if (lastnumber < command_number || lastweapon != weapon->GetModel() ||
-        lastnumber - command_number > 1000)
+    if (lastnumber < command_number || lastweapon != weapon->GetModel() || lastnumber - command_number > 1000)
     {
-        if (cached_calculation.init_command > command_number ||
-            command_number - cached_calculation.init_command > 4096 ||
-            (command_number &&
-             (cached_calculation.command_number < command_number)))
-            cached_calculation.weapon_entity = 0;
-        if (cached_calculation.weapon_entity == weapon->entindex())
-            return bool(cached_calculation.command_number);
-
+        if (!*crit_experimental || g_pLocalPlayer->weapon_mode == weapon_melee)
+        {
+            if (cached_calculation.init_command > command_number || command_number - cached_calculation.init_command > 4096 || (command_number && (cached_calculation.command_number < command_number)))
+                cached_calculation.weapon_entity = 0;
+            if (cached_calculation.weapon_entity == weapon->entindex())
+                return bool(cached_calculation.command_number);
+        }
         number = find_next_random_crit_for_weapon(weapon);
     }
     else
         number = lastnumber;
     // logging::Info("Found critical: %d -> %d", command_number,
     //              number);
-    lastweapon = weapon->GetModel();
-    lastnumber = number;
     if (crit_experimental && GetWeaponMode() != weapon_melee)
     {
+        cached_calculation.command_number = number;
+        cached_calculation.weapon_entity  = LOCAL_W->m_IDX;
         if (!crit_legiter)
         {
             if (number && number != command_number)
-                command_number_mod[command_number] = number;
-
-            cached_calculation.command_number = number;
-            cached_calculation.weapon_entity  = LOCAL_W->m_IDX;
+            {
+                command_number_mod[command_number]                     = number;
+                auto ch                                                = (INetChannel *) g_IEngine->GetNetChannelInfo();
+                *(int *) ((uint64_t) ch + offsets::m_nOutSequenceNr()) = number - 1;
+            }
         }
-        else
+        else if (number && number != command_number && number - 30 < command_number)
         {
-            if (number && number - 30 < command_number)
-                command_number_mod[command_number] = number;
 
-            cached_calculation.command_number = number;
-            cached_calculation.weapon_entity  = LOCAL_W->m_IDX;
+            command_number_mod[command_number]                     = number;
+            auto ch                                                = (INetChannel *) g_IEngine->GetNetChannelInfo();
+            *(int *) ((uint64_t) ch + offsets::m_nOutSequenceNr()) = number - 1;
         }
     }
     else
@@ -152,13 +133,14 @@ bool force_crit(IClientEntity *weapon)
         }
         else
         {
-            if (command_number + 30 > number && number &&
-                number != command_number)
+            if (command_number + 30 > number && number && number != command_number)
                 current_user_cmd->buttons &= ~IN_ATTACK;
             else
                 current_user_cmd->buttons |= IN_ATTACK;
         }
     }
+    lastweapon = weapon->GetModel();
+    lastnumber = number;
     return number != 0;
 }
 
@@ -177,16 +159,14 @@ void create_move()
         return;
     if (!re::C_TFWeaponBase::AreRandomCritsEnabled(weapon))
         return;
+    if (!CanShoot())
+        return;
     unfuck_bucket(weapon);
-    if ((current_user_cmd->buttons & IN_ATTACK) && crit_key &&
-        crit_key.isKeyDown() && current_user_cmd->command_number)
+    if ((current_user_cmd->buttons & IN_ATTACK) && crit_key && crit_key.isKeyDown() && current_user_cmd->command_number)
     {
         force_crit(weapon);
     }
-    else if ((current_user_cmd->buttons & IN_ATTACK) &&
-             current_user_cmd->command_number &&
-             GetWeaponMode() == weapon_melee && crit_melee &&
-             g_pLocalPlayer->weapon()->m_iClassID() != CL_CLASS(CTFKnife))
+    else if ((current_user_cmd->buttons & IN_ATTACK) && current_user_cmd->command_number && GetWeaponMode() == weapon_melee && crit_melee && g_pLocalPlayer->weapon()->m_iClassID() != CL_CLASS(CTFKnife))
     {
         force_crit(weapon);
     }
@@ -194,8 +174,7 @@ void create_move()
 
 bool random_crits_enabled()
 {
-    static ConVar *tf_weapon_criticals =
-        g_ICvar->FindVar("tf_weapon_criticals");
+    static ConVar *tf_weapon_criticals = g_ICvar->FindVar("tf_weapon_criticals");
     return tf_weapon_criticals->GetBool();
 }
 
@@ -223,34 +202,34 @@ void draw()
                 AddCenterString("Random crits are disabled", colors::yellow);
             else
             {
-                if (!re::C_TFWeaponBase::CanFireCriticalShot(RAW_ENT(LOCAL_W),
-                                                             false, nullptr))
-                    AddCenterString("Weapon can't randomly crit",
-                                    colors::yellow);
+                if (!re::C_TFWeaponBase::CanFireCriticalShot(RAW_ENT(LOCAL_W), false, nullptr))
+                    AddCenterString("Weapon can't randomly crit", colors::yellow);
                 else if (lastusercmd)
                 {
                     if (number > lastusercmd)
                     {
-                        float nextcrit =
-                            ((float) number - (float) lastusercmd) / (float) 90;
+                        float nextcrit = ((float) number - (float) lastusercmd) / (float) 90;
                         if (nextcrit > 0.0f)
                         {
-                            AddCenterString(
-                                format("Time to next crit: ", nextcrit, "s"),
-                                colors::orange);
+                            AddCenterString(format("Time to next crit: ", nextcrit, "s"), colors::orange);
                         }
                     }
                     AddCenterString("Weapon can randomly crit");
                 }
             }
-            AddCenterString(format("Bucket: ", re::C_TFWeaponBase::crit_bucket_(
-                                                   RAW_ENT(LOCAL_W))));
+            AddCenterString(format("Bucket: ", re::C_TFWeaponBase::crit_bucket_(RAW_ENT(LOCAL_W))));
         }
         // AddCenterString(format("Time: ",
         // *(float*)((uintptr_t)RAW_ENT(LOCAL_W) + 2872u)));
     }
 }
 #endif
+static InitRoutine init([]() {
+    EC::Register(EC::CreateMove, criticals::create_move, "cm_crits", EC::very_late);
+#if ENABLE_VISUALS
+    EC::Register(EC::Draw, criticals::draw, "draw_crits");
+#endif
+});
 } // namespace criticals
 
 void crithack_saved_state::Load(IClientEntity *entity)

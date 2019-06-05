@@ -1,35 +1,28 @@
-# NullWorks code style (Work in progress)
+## Contributing to Cathook or other Nullworks Projects
 
-## C/C++
+### Prerequisites
 
-### General
+- A working up-to-date cathook installation
+- C++ knowledge
+- Git knowledge
+- Ability to ask for help (Feel free to create empty pull-request or PM a maintainer in [Telegram](https://t.me/nullifiedcat))
 
-- Code must be formatted with `clang-format`, the `.clang-format` settings file is provided within this repo.
-- `using namespace` is strictly forbidden.
-- [Hungarian notation](https://en.wikipedia.org/wiki/Hungarian_notation) is forbidden.
+### Setting up cathook
 
-### File names
+Cathook reduces its git repository size automatically by using a "shallow repository". This makes developing difficult by not providing branches and omitting the commit history.
 
-`PascalCase`.
+The easiest way to undo this is by running the `developer` script located in `scripts`.
 
-### Header files
+### Pull requests and Branches
 
-Header files must have extension of `.hpp` and be guarded with `#pragma once` in the beginning.
+In order to send code back to the official cathook repository, you must first create a copy of cathook on your github account ([fork](https://help.github.com/articles/creating-a-pull-request-from-a-fork/)) and then [create a pull request](https://help.github.com/articles/creating-a-pull-request-from-a-fork/) back to cathook.
 
-### Variable names
+All cathook developement is usually performed on the `testing` branch. Please make sure to submit your pull request to that branch. 
 
-- Variable names must be `lower_snake_case`, member variable names **must not** be prefixed by `m_` or any other prefixes.
-- Constants must be in `UPPER_SNAKE_CASE` and use `constexpr`, not `#define`. For example: `constexpr int MAX = 100;`.
+### Code-Style
 
-### Namespace names
+The nullworks code-style can be found in `code-style.md`.
 
-Namespace names follow the same rules as *Variable names*.
+### Building
 
-### Function names
-
-Function/method names must be in `lowerCamelCase`.
-
-### Class names
-
-- Class names must be in `PascalCase`.
-- Struct names must be in `lower_snake_case`.
+Cathook has already created the directory `build` where cmake files are located. By default, you can build cathook by running `cmake .. && make -j$(grep -c '^processor' /proc/cpuinfo)` in the `build` directory. You can then test your changes by using one of the attach scripts at your disposal.

@@ -13,20 +13,18 @@ namespace hooked_methods
 DEFINE_HOOKED_METHOD(LevelShutdown, void, void *this_)
 {
     need_name_change = true;
-#if !LAGBOT_MODE
     playerlist::Save();
-#endif
     g_Settings.bInvalid = true;
-#if !LAGBOT_MODE
-    hacks::shared::aimbot::Reset();
     chat_stack::Reset();
-    hacks::shared::anticheat::ResetEverything();
+#if ENABLE_VISUALS
+    effect_glow::g_EffectGlow.Shutdown();
+    effect_chams::g_EffectChams.Shutdown();
 #endif
+    EC::run(EC::LevelShutdown);
 #if ENABLE_IPC
     if (ipc::peer)
     {
-        ipc::peer->memory->peer_user_data[ipc::peer->client_id]
-            .ts_disconnected = time(nullptr);
+        ipc::peer->memory->peer_user_data[ipc::peer->client_id].ts_disconnected = time(nullptr);
     }
 #endif
     return original::LevelShutdown(this_);

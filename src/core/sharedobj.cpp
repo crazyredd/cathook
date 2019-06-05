@@ -36,8 +36,7 @@ bool LocateSharedObject(std::string &name, std::string &out_full_path)
     return false;
 }
 
-SharedObject::SharedObject(const char *_file, bool _factory)
-    : file(_file), path("unassigned"), factory(_factory)
+SharedObject::SharedObject(const char *_file, bool _factory) : file(_file), path("unassigned"), factory(_factory)
 {
     constructed = true;
 }
@@ -57,16 +56,13 @@ void SharedObject::Load()
             logging::Info("DLERROR: %s", error);
         }
     }
-    logging::Info("Shared object %s loaded at 0x%08x", basename(lmap->l_name),
-                  lmap->l_addr);
+    logging::Info("Shared object %s loaded at 0x%08x", basename(lmap->l_name), lmap->l_addr);
     if (factory)
     {
-        fptr = reinterpret_cast<fn_CreateInterface_t>(
-            dlsym(lmap, "CreateInterface"));
+        fptr = reinterpret_cast<fn_CreateInterface_t>(dlsym(lmap, "CreateInterface"));
         if (!this->fptr)
         {
-            logging::Info("Failed to create interface factory for %s",
-                          basename(lmap->l_name));
+            logging::Info("Failed to create interface factory for %s", basename(lmap->l_name));
         }
     }
 }
@@ -95,10 +91,13 @@ void LoadAllSharedObjects()
         steamclient().Load();
         client().Load();
         engine().Load();
+        steamapi().Load();
         vstdlib().Load();
         tier0().Load();
         inputsystem().Load();
         materialsystem().Load();
+        filesystem_stdio().Load();
+        datacache().Load();
 #if ENABLE_VISUALS
         vguimatsurface().Load();
         vgui2().Load();
@@ -115,6 +114,11 @@ void LoadAllSharedObjects()
 SharedObject &steamclient()
 {
     static SharedObject obj("steamclient.so", true);
+    return obj;
+}
+SharedObject &steamapi()
+{
+    static SharedObject obj("libsteam_api.so", false);
     return obj;
 }
 SharedObject &client()
@@ -147,6 +151,17 @@ SharedObject &materialsystem()
     static SharedObject obj("materialsystem.so", true);
     return obj;
 }
+
+SharedObject &filesystem_stdio()
+{
+    static SharedObject obj("filesystem_stdio.so", true);
+    return obj;
+}
+SharedObject &datacache()
+{
+    static SharedObject obj("datacache.so", true);
+    return obj;
+}
 #if ENABLE_VISUALS
 SharedObject &vguimatsurface()
 {
@@ -168,5 +183,6 @@ SharedObject &libsdl()
     static SharedObject obj("libSDL2-2.0.so.0", false);
     return obj;
 }
+
 #endif
 } // namespace sharedobj

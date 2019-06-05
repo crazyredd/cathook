@@ -5,22 +5,14 @@
  *      Author: nullifiedcat
  */
 
-// The code below was obtained from:
-// http://stackoverflow.com/questions/77005/how-to-generate-a-stacktrace-when-my-gcc-c-app-crashes/1925461#1925461
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-#ifndef __USE_GNU
 #define __USE_GNU
-#endif
-
 #include <execinfo.h>
 #include <signal.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <ucontext.h>
-#include <unistd.h>
+#include <dlfcn.h>
+#include <boost/stacktrace.hpp>
+#include <cxxabi.h>
 #include <visual/SDLHooks.hpp>
 #include "hack.hpp"
 #include "common.hpp"
@@ -33,14 +25,17 @@
 
 #include "copypasted/CDumper.hpp"
 #include "version.h"
+#include <cxxabi.h>
 
 /*
  *  Credits to josh33901 aka F1ssi0N for butifel F1Public and Darkstorm 2015
  * Linux
  */
 
-bool hack::shutdown    = false;
-bool hack::initialized = false;
+// game_shutdown = Is full game shutdown or just detach
+bool hack::game_shutdown = true;
+bool hack::shutdown      = false;
+bool hack::initialized   = false;
 
 const std::string &hack::GetVersion()
 {
@@ -48,8 +43,8 @@ const std::string &hack::GetVersion()
     static bool version_set = false;
     if (version_set)
         return version;
-#if defined(GIT_COMMIT_HASH) && defined(GIT_COMMIT_DATE)
-    version = "Version: #" GIT_COMMIT_HASH " " GIT_COMMIT_DATE;
+#if defined(GIT_COMMIT_HASH) && defined(GIT_COMMITTER_DATE)
+    version = "Version: #" GIT_COMMIT_HASH " " GIT_COMMITTER_DATE;
 #endif
     version_set = true;
     return version;
@@ -99,92 +94,123 @@ std::stack<std::string> &hack::command_stack()
     return stack;
 }
 
-void hack::ExecuteCommand(const std::string command)
+void hack::ExecuteCommand(const std::string &command)
 {
     std::lock_guard<std::mutex> guard(hack::command_stack_mutex);
     hack::command_stack().push(command);
 }
 
-/* This structure mirrors the one found in /usr/include/asm/ucontext.h */
-typedef struct _sig_ucontext
+#if ENABLE_LOGGING
+void critical_error_handler(int signum)
 {
-    unsigned long uc_flags;
-    struct ucontext *uc_link;
-    stack_t uc_stack;
-    struct sigcontext uc_mcontext;
-    sigset_t uc_sigmask;
-} sig_ucontext_t;
+    namespace st = boost::stacktrace;
+    ::signal(signum, SIG_DFL);
+    passwd *pwd = getpwuid(getuid());
+    std::ofstream out(strfmt("/tmp/cathook-%s-%d-segfault.log", pwd->pw_name, getpid()).get());
 
-void crit_err_hdlr(int sig_num, siginfo_t *info, void *ucontext)
-{
-    void *array[50];
-    void *caller_address;
-    char **messages;
-    int size, i;
-    sig_ucontext_t *uc;
+    Dl_info info;
+    if (!dladdr(reinterpret_cast<void *>(hack::ExecuteCommand), &info))
+        return;
+    unsigned int baseaddr = (unsigned int) info.dli_fbase - 1;
 
-    uc = (sig_ucontext_t *) ucontext;
+    for (auto i : st::stacktrace())
+    {
+        unsigned int offset = (unsigned int) (i.address()) - baseaddr;
+        Dl_info info2;
+        out << (void *) offset;
+        if (!dladdr(i.address(), &info2))
+        {
+            out << std::endl;
+            continue;
+        }
+        out << " " << info2.dli_fname << ": ";
+        if (info2.dli_sname)
+        {
+            int status     = -4;
+            char *realname = abi::__cxa_demangle(info2.dli_sname, nullptr, nullptr, &status);
+            if (status == 0)
+            {
+                out << realname << std::endl;
+                free(realname);
+            }
+            else
+                out << info2.dli_sname << std::endl;
+        }
+        else
+            out << "No Symbol" << std ::endl;
+    }
 
-/* Get the address at the time the signal was raised */
-#if defined(__i386__)                              // gcc specific
-    caller_address = (void *) uc->uc_mcontext.eip; // EIP: x86 specific
-#elif defined(__x86_64__)                          // gcc specific
-    caller_address = (void *) uc->uc_mcontext.rip; // RIP: x86_64 specific
-#else
-#error Unsupported architecture. // TODO: Add support for other arch.
+    out.close();
+    ::raise(SIGABRT);
+}
 #endif
 
-    fprintf(stderr, "\n");
-    FILE *backtraceFile;
-
-    // In this example we write the stacktrace to a file. However, we can also
-    // just fprintf to stderr (or do both).
-    passwd *pwd   = getpwuid(getuid());
-    backtraceFile = fopen(
-        strfmt("/tmp/cathook-%s-%d-segfault.log", pwd->pw_name, getpid()).get(),
-        "w");
-
-    if (sig_num == SIGSEGV)
-        fprintf(backtraceFile, "signal %d (%s), address is %p from %p\n",
-                sig_num, strsignal(sig_num), info->si_addr,
-                (void *) caller_address);
-    else
-        fprintf(backtraceFile, "signal %d (%s)\n", sig_num, strsignal(sig_num));
-
-    size = backtrace(array, 50);
-    /* overwrite sigaction with caller's address */
-    array[1] = caller_address;
-    messages = backtrace_symbols(array, size);
-    /* skip first stack frame (points here) */
-    for (i = 1; i < size && messages != NULL; ++i)
-    {
-        fprintf(backtraceFile, "[bt]: (%d) %s\n", i, messages[i]);
-    }
-
-    fclose(backtraceFile);
-    free(messages);
-
-    exit(EXIT_FAILURE);
-}
-
-void installSignal(int __sig)
+static bool blacklist_file(const char *filename)
 {
-    struct sigaction sigact;
-    sigact.sa_sigaction = crit_err_hdlr;
-    sigact.sa_flags     = SA_RESTART | SA_SIGINFO;
-    if (sigaction(__sig, &sigact, (struct sigaction *) NULL) != 0)
+    const static char *blacklist[] = { ".vtx", ".vtf", ".pcf", ".mdl" };
+    if (!filename || !std::strcmp(filename, "models/error.mdl") || !std::strncmp(filename, "models/buildables", 17) || !std::strcmp(filename, "models/vgui/competitive_badge.mdl") || !std::strcmp(filename, "models/vgui/12v12_badge.mdl") || !std::strncmp(filename, "models/player/", 14) || !std::strncmp(filename, "models/weapons/", 15))
+        return false;
+
+    std::size_t len = std::strlen(filename);
+    if (len > 3)
     {
-        fprintf(stderr, "error setting signal handler for %d (%s)\n", __sig,
-                strsignal(__sig));
-        exit(EXIT_FAILURE);
+        auto ext_p = filename + len - 4;
+        for (int i = 0; i < sizeof(blacklist) / sizeof(blacklist[0]); ++i)
+            if (!std::strcmp(ext_p, blacklist[i]))
+                return true;
     }
+    return false;
 }
+
+static bool (*FSorig_ReadFile)(void *, const char *, const char *, void *, int, int, void *);
+static bool FSHook_ReadFile(void *this_, const char *pFileName, const char *pPath, void *buf, int nMaxBytes, int nStartingByte, void *pfnAlloc)
+{
+    // fprintf(stderr, "ReadFile: %s\n", pFileName);
+    if (blacklist_file(pFileName))
+        return false;
+    return FSorig_ReadFile(this_, pFileName, pPath, buf, nMaxBytes, nStartingByte, pfnAlloc);
+}
+
+static hooks::VMTHook /*fs_hook,*/ fs_hook2;
+static void ReduceRamUsage()
+{
+    fs_hook2.Set(reinterpret_cast<void *>(g_IFileSystem), 4);
+    fs_hook2.HookMethod(FSHook_ReadFile, 14, &FSorig_ReadFile);
+    fs_hook2.Apply();
+
+    /* ERROR: Must be called from texture thread */
+    // g_IMaterialSystem->ReloadTextures();
+    g_IBaseClient->InvalidateMdlCache();
+}
+
+static void UnHookFs()
+{
+    fs_hook2.Release();
+    g_IBaseClient->InvalidateMdlCache();
+}
+
+static void InitRandom()
+{
+    int rand_seed;
+    FILE *rnd = fopen("/dev/urandom", "rb");
+    if (!rnd || fread(&rand_seed, sizeof(rand_seed), 1, rnd) < 1)
+    {
+        logging::Info("Warning!!! Failed read from /dev/urandom (%s). Randomness is going to be weak", strerror(errno));
+        timespec t;
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        rand_seed = t.tv_nsec ^ t.tv_sec & getpid();
+    }
+    srand(rand_seed);
+    if (rnd)
+        fclose(rnd);
+}
+
 void hack::Initialize()
 {
-    signal(SIGPIPE, SIG_IGN);
-    installSignal(SIGSEGV);
-    installSignal(SIGABRT);
-    installSignal(SIGINT);
+#if ENABLE_LOGGING
+    ::signal(SIGSEGV, &critical_error_handler);
+    ::signal(SIGABRT, &critical_error_handler);
+#endif
     time_injected = time(nullptr);
 /*passwd *pwd   = getpwuid(getuid());
 char *logname = strfmt("/tmp/cathook-game-stdout-%s-%u.log", pwd->pw_name,
@@ -200,8 +226,7 @@ free(logname);*/
 #if ENABLE_VISUALS
 
     {
-        std::vector<std::string> essential = { "menu.json",
-                                               "fonts/tf2build.ttf" };
+        std::vector<std::string> essential = { "fonts/tf2build.ttf" };
         for (const auto &s : essential)
         {
             std::ifstream exists(DATA_PATH "/" + s, std::ios::in);
@@ -217,12 +242,17 @@ free(logname);*/
     }
 
 #endif /* TEXTMODE */
-
     logging::Info("Initializing...");
-    srand(time(0));
+    InitRandom();
     sharedobj::LoadAllSharedObjects();
     CreateInterfaces();
     CDumper dumper;
+    null_graphics.installChangeCallback([](settings::VariableBase<bool> &, bool after) {
+        if (after)
+            ReduceRamUsage();
+        else
+            UnHookFs();
+    });
     dumper.SaveDump();
     logging::Info("Is TF2? %d", IsTF2());
     logging::Info("Is TF2C? %d", IsTF2C());
@@ -251,9 +281,7 @@ free(logname);*/
     uintptr_t *clientMode = 0;
     // Bad way to get clientmode.
     // FIXME [MP]?
-    while (!(
-        clientMode = **(
-            uintptr_t ***) ((uintptr_t)((*(void ***) g_IBaseClient)[10]) + 1)))
+    while (!(clientMode = **(uintptr_t ***) ((uintptr_t)((*(void ***) g_IBaseClient)[10]) + 1)))
     {
         usleep(10000);
     }
@@ -284,20 +312,18 @@ free(logname);*/
     hooks::vstd.Apply();
 
     hooks::panel.Set(g_IPanel);
-    hooks::panel.HookMethod(hooked_methods::methods::PaintTraverse,
-                            offsets::PaintTraverse(),
-                            &hooked_methods::original::PaintTraverse);
+    hooks::panel.HookMethod(hooked_methods::methods::PaintTraverse, offsets::PaintTraverse(), &hooked_methods::original::PaintTraverse);
     hooks::panel.Apply();
 #endif
 
     hooks::input.Set(g_IInput);
     hooks::input.HookMethod(HOOK_ARGS(GetUserCmd));
     hooks::input.Apply();
-#if ENABLE_VISUALS
+
     hooks::modelrender.Set(g_IVModelRender);
     hooks::modelrender.HookMethod(HOOK_ARGS(DrawModelExecute));
     hooks::modelrender.Apply();
-#endif
+
     hooks::enginevgui.Set(g_IEngineVGui);
     hooks::enginevgui.HookMethod(HOOK_ARGS(Paint));
     hooks::enginevgui.Apply();
@@ -315,35 +341,7 @@ free(logname);*/
     hooks::steamfriends.HookMethod(HOOK_ARGS(GetFriendPersonaName));
     hooks::steamfriends.Apply();
 
-#if ENABLE_NULL_GRAPHICS
-    g_IMaterialSystem->SetInStubMode(true);
-    IF_GAME(IsTF2())
-    {
-        logging::Info("Graphics Nullified");
-        logging::Info("The game will crash");
-        // TODO offsets::()?
-        hooks::materialsystem.Set((void *) g_IMaterialSystem);
-        uintptr_t base = *(uintptr_t *) (g_IMaterialSystem);
-        hooks::materialsystem.HookMethod((void *) ReloadTextures_null_hook, 70);
-        hooks::materialsystem.HookMethod((void *) ReloadMaterials_null_hook,
-                                         71);
-        hooks::materialsystem.HookMethod((void *) FindMaterial_null_hook, 73);
-        hooks::materialsystem.HookMethod((void *) FindTexture_null_hook, 81);
-        hooks::materialsystem.HookMethod((void *) ReloadFilesInList_null_hook,
-                                         121);
-        hooks::materialsystem.HookMethod((void *) FindMaterialEx_null_hook,
-                                         123);
-        hooks::materialsystem.Apply();
-        // hooks::materialsystem.HookMethod();
-    }
-#endif
-#if not LAGBOT_MODE
     // FIXME [MP]
-    hacks::shared::killsay::init();
-    hacks::shared::announcer::init();
-    hacks::tf2::killstreak::init();
-#endif
-    hacks::shared::catbot::init();
     logging::Info("Hooked!");
     velocity::Init();
     playerlist::Load();
@@ -354,12 +352,9 @@ free(logname);*/
 #ifndef FEATURE_EFFECTS_DISABLED
     if (g_ppScreenSpaceRegistrationHead && g_pScreenSpaceEffects)
     {
-        effect_chams::g_pEffectChams = new CScreenSpaceEffectRegistration(
-            "_cathook_chams", &effect_chams::g_EffectChams);
+        effect_chams::g_pEffectChams = new CScreenSpaceEffectRegistration("_cathook_chams", &effect_chams::g_EffectChams);
         g_pScreenSpaceEffects->EnableScreenSpaceEffect("_cathook_chams");
-        effect_chams::g_EffectChams.Init();
-        effect_glow::g_pEffectGlow = new CScreenSpaceEffectRegistration(
-            "_cathook_glow", &effect_glow::g_EffectGlow);
+        effect_glow::g_pEffectGlow = new CScreenSpaceEffectRegistration("_cathook_glow", &effect_glow::g_EffectGlow);
         g_pScreenSpaceEffects->EnableScreenSpaceEffect("_cathook_glow");
     }
     logging::Info("SSE enabled..");
@@ -368,29 +363,12 @@ free(logname);*/
     logging::Info("SDL hooking done");
 
 #endif /* TEXTMODE */
-#if not LAGBOT_MODE
-    hacks::shared::anticheat::Init();
-#endif
 #if ENABLE_VISUALS
 #ifndef FEATURE_FIDGET_SPINNER_ENABLED
     InitSpinner();
     logging::Info("Initialized Fidget Spinner");
 #endif
-    hacks::shared::spam::init();
 #endif
-#if not LAGBOT_MODE
-    hacks::shared::walkbot::Initialize();
-#endif
-#if ENABLE_VISUALS
-    hacks::shared::esp::Init();
-#endif
-#if not ENABLE_VISUALS
-    hack::command_stack().push("exec cat_autoexec_textmode");
-#endif
-    hack::command_stack().push("exec cat_autoexec");
-    hack::command_stack().push("cat_killsay_reload");
-    hack::command_stack().push("cat_spam_reload");
-
     logging::Info("Clearing initializer stack");
     while (!init_stack().empty())
     {
@@ -398,6 +376,14 @@ free(logname);*/
         init_stack().pop();
     }
     logging::Info("Initializer stack done");
+#if not ENABLE_VISUALS
+    hack::command_stack().push("exec cat_autoexec_textmode");
+#else
+    hack::command_stack().push("exec cat_autoexec");
+#endif
+    auto extra_exec = std::getenv("CH_EXEC");
+    if (extra_exec)
+        hack::command_stack().push(extra_exec);
 
     hack::initialized = true;
     for (int i = 0; i < 12; i++)
@@ -423,16 +409,22 @@ void hack::Shutdown()
     if (hack::shutdown)
         return;
     hack::shutdown = true;
+    // Stop cathook stuff
+    settings::cathook_disabled.store(true);
     playerlist::Save();
 #if ENABLE_VISUALS
     sdl_hooks::cleanSdlHooks();
 #endif
     logging::Info("Unregistering convars..");
     ConVar_Unregister();
-#if not LAGBOT_MODE
     logging::Info("Shutting down killsay...");
-    hacks::shared::killsay::shutdown();
-    hacks::shared::announcer::shutdown();
+    if (!hack::game_shutdown)
+    {
+        EC::run(EC::Shutdown);
+#if ENABLE_VISUALS
+        g_pScreenSpaceEffects->DisableScreenSpaceEffect("_cathook_glow");
+        g_pScreenSpaceEffects->DisableScreenSpaceEffect("_cathook_chams");
 #endif
+    }
     logging::Info("Success..");
 }

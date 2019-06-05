@@ -6,22 +6,25 @@
 #include <fstream>
 #include <sstream>
 #include "core/logging.hpp"
+#include "interfaces.hpp"
+#include "icvar.h"
+#include "MiscTemporary.hpp"
 
-settings::SettingsWriter::SettingsWriter(settings::Manager &manager)
-    : manager(manager)
+settings::SettingsWriter::SettingsWriter(settings::Manager &manager) : manager(manager)
 {
 }
 
-bool settings::SettingsWriter::saveTo(std::string path, bool only_changed)
+bool settings::SettingsWriter::saveTo(std::string path)
 {
     logging::Info("cat_save: started");
-    this->only_changed = only_changed;
+    this->only_changed = true;
 
     stream.open(path, std::ios::out);
 
     if (!stream || stream.bad() || !stream.is_open() || stream.fail())
     {
         logging::Info("cat_save: FATAL! FAILED to create stream!");
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "CAT: cat_save: Can't create config file!\n");
         return false;
     }
 
@@ -31,14 +34,10 @@ bool settings::SettingsWriter::saveTo(std::string path, bool only_changed)
     for (auto &v : settings::Manager::instance().registered)
     {
         if (!only_changed || v.second.isChanged())
-            all_registered.emplace_back(
-                std::make_pair(v.first, &v.second.variable));
+            all_registered.emplace_back(std::make_pair(v.first, &v.second.variable));
     }
     logging::Info("cat_save: Sorting...");
-    std::sort(all_registered.begin(), all_registered.end(),
-              [](const pair_type &a, const pair_type &b) -> bool {
-                  return a.first.compare(b.first) < 0;
-              });
+    std::sort(all_registered.begin(), all_registered.end(), [](const pair_type &a, const pair_type &b) -> bool { return a.first.compare(b.first) < 0; });
     logging::Info("cat_save: Writing...");
     for (auto &v : all_registered)
         if (!v.first.empty())
@@ -47,8 +46,12 @@ bool settings::SettingsWriter::saveTo(std::string path, bool only_changed)
             stream.flush();
         }
     if (!stream || stream.bad() || stream.fail())
+    {
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "CAT: cat_save: Failed to save config!\n");
         logging::Info("cat_save: FATAL! Stream bad!");
-    logging::Info("cat_save: Finished");
+    }
+    else
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "CAT: cat_save: Successfully saved config!\n");
     stream.close();
     if (stream.fail())
         logging::Info("cat_save: FATAL! Stream bad (2)!");
@@ -77,6 +80,7 @@ void settings::SettingsWriter::writeEscaped(std::string str)
         case '#':
         case '\n':
         case '=':
+        case '\\':
             stream << '\\';
             break;
         default:
@@ -86,8 +90,7 @@ void settings::SettingsWriter::writeEscaped(std::string str)
     }
 }
 
-settings::SettingsReader::SettingsReader(settings::Manager &manager)
-    : manager(manager)
+settings::SettingsReader::SettingsReader(settings::Manager &manager) : manager(manager)
 {
 }
 
@@ -98,7 +101,13 @@ bool settings::SettingsReader::loadFrom(std::string path)
     if (stream.fail())
     {
         logging::Info("cat_load: Can't access file!");
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "CAT: cat_load: File doesn't exist / can't open file!\n");
         return false;
+    }
+
+    for (auto &v : settings::Manager::instance().registered)
+    {
+        v.second.variable.fromString(v.second.defaults);
     }
 
     while (!stream.fail())
@@ -112,10 +121,12 @@ bool settings::SettingsReader::loadFrom(std::string path)
     if (stream.fail() && !stream.eof())
     {
         logging::Info("cat_load: FATAL: Read failed!");
+        g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "CAT: cat_load: Failed to read config!\n");
         return false;
     }
 
     logging::Info("cat_load: Read Success!");
+    g_ICvar->ConsoleColorPrintf(Color(*print_r, *print_g, *print_b, 255), "CAT: cat_load: Successfully loaded config!\n");
     finishString(true);
 
     return true;
@@ -198,8 +209,7 @@ void settings::SettingsReader::finishString(bool complete)
     temporary_spaces.clear();
 }
 
-void settings::SettingsReader::onReadKeyValue(std::string key,
-                                              std::string value)
+void settings::SettingsReader::onReadKeyValue(std::string key, std::string value)
 {
     printf("Read: '%s' = '%s'\n", key.c_str(), value.c_str());
     auto v = manager.lookup(key);

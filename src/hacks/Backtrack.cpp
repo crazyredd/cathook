@@ -9,28 +9,30 @@
 #include "hacks/Aimbot.hpp"
 #include "hacks/Backtrack.hpp"
 #include <boost/circular_buffer.hpp>
-#if ENABLE_VISUALS
-#include <glez/draw.hpp>
-#endif
 #include <settings/Bool.hpp>
+#include "PlayerTools.hpp"
 #include <hacks/Backtrack.hpp>
-
-static settings::Bool enable{ "backtrack.enable", "false" };
-static settings::Bool draw_bt{ "backtrack.draw", "false" };
-static settings::Int latency{ "backtrack.latency", "0" };
-static settings::Float mindistance{ "backtrack.min-distance", "60" };
-static settings::Int slots{ "backtrack.slots", "0" };
 
 namespace hacks::shared::backtrack
 {
+static settings::Boolean draw_bt{ "backtrack.draw", "false" };
+static settings::Boolean draw_skeleton{ "backtrack.draw-skeleton", "false" };
+static settings::Float mindistance{ "backtrack.min-distance", "60" };
+
+static settings::Int slots{ "backtrack.slots", "0" };
+
+settings::Boolean enable{ "backtrack.enable", "false" };
+settings::Boolean backtrack_chams_glow{ "backtrack.chams_glow", "true" };
+settings::Int latency{ "backtrack.latency", "0" };
+
 void EmptyBacktrackData(BacktrackData &i);
 std::pair<int, int> getBestEntBestTick();
 bool shouldBacktrack();
 
-BacktrackData headPositions[32][66]{};
-int highesttick[32]{};
+BacktrackData headPositions[33][66]{};
 int lastincomingsequencenumber = 0;
 bool isBacktrackEnabled        = false;
+bool Vischeck_Success          = false;
 
 circular_buf sequences{ 2048 };
 void UpdateIncomingSequences()
@@ -43,20 +45,22 @@ void UpdateIncomingSequences()
         if (m_nInSequenceNr > lastincomingsequencenumber)
         {
             lastincomingsequencenumber = m_nInSequenceNr;
-            sequences.push_front(CIncomingSequence(instate, m_nInSequenceNr,
-                                                   g_GlobalVars->realtime));
+            sequences.push_front(CIncomingSequence(instate, m_nInSequenceNr, g_GlobalVars->realtime));
         }
-
         if (sequences.size() > 2048)
             sequences.pop_back();
     }
 }
-void AddLatencyToNetchan(INetChannel *ch, float Latency)
+void AddLatencyToNetchan(INetChannel *ch)
 {
     if (!isBacktrackEnabled)
         return;
-    if (Latency > 200.0f)
-        Latency -= ch->GetLatency(MAX_FLOWS);
+    float Latency = *latency;
+    if (Latency > 1000.0f)
+        Latency = 800.0f;
+    Latency -= getRealLatency();
+    if (Latency < 0.0f)
+        Latency = 0.0f;
     for (auto &seq : sequences)
     {
         if (g_GlobalVars->realtime - seq.curtime > Latency / 1000.0f)
@@ -69,27 +73,33 @@ void AddLatencyToNetchan(INetChannel *ch, float Latency)
 }
 void Init()
 {
-    for (int i = 0; i < 32; i++)
+    for (int i = 0; i < 33; i++)
         for (int j = 0; j < 66; j++)
-            EmptyBacktrackData(headPositions[i][j]);
+            headPositions[i][j] = {};
+
+    BestTick = iBestTarget = -1;
 }
 
-int BestTick    = 0;
+int BestTick    = -1;
 int iBestTarget = -1;
 bool istickvalid[32][66]{};
 bool istickinvalid[32][66]{};
-void Run()
+static void Run()
 {
     if (!shouldBacktrack())
     {
         isBacktrackEnabled = false;
         return;
     }
+    UpdateIncomingSequences();
     isBacktrackEnabled = true;
 
-    if (CE_BAD(LOCAL_E))
+    if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer() || CE_BAD(LOCAL_W))
         return;
-
+    if (g_Settings.bInvalid)
+        return;
+    if (!current_user_cmd)
+        return;
     for (auto &a : istickvalid)
         for (auto &b : a)
             b = false;
@@ -99,58 +109,56 @@ void Run()
     CUserCmd *cmd = current_user_cmd;
     float bestFov = 99999;
 
-    float prev_distance = 9999;
-
-    auto bestEntBestTick = getBestEntBestTick();
-    BestTick             = bestEntBestTick.second;
-    iBestTarget          = bestEntBestTick.first;
-
-    for (int i = 1; i < g_IEngine->GetMaxClients(); i++)
+    float prev_distance                 = 9999;
+    std::pair<int, int> bestEntBestTick = getBestEntBestTick();
+    BestTick                            = bestEntBestTick.second;
+    iBestTarget                         = bestEntBestTick.first;
+    // Fill backtrack data (stored in headPositions)
     {
-        CachedEntity *pEntity = ENTITY(i);
+        PROF_SECTION(cm_bt_ent_loop)
+        for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
+        {
+            CachedEntity *pEntity = ENTITY(i);
+            if (CE_BAD(pEntity) || !pEntity->m_bAlivePlayer())
+            {
+                for (BacktrackData &btd : headPositions[i])
+                    btd.simtime = FLT_MAX;
+                continue;
+            }
+            if (!pEntity->m_bEnemy())
+                continue;
+            if (pEntity->m_Type() != ENTITY_PLAYER)
+                continue;
+            if (!pEntity->hitboxes.GetHitbox(0))
+                continue;
+            if (HasCondition<TFCond_HalloweenGhostMode>(pEntity))
+                continue;
+            if (!*bSendPackets)
+                headPositions[i][cmd->command_number % getTicks()] = {};
+            else
+            {
+                auto &hbd         = headPositions[i][cmd->command_number % getTicks()];
+                float _viewangles = CE_VECTOR(pEntity, netvar.m_angEyeAngles).y;
+                hbd.viewangles    = (_viewangles > 180) ? _viewangles - 360 : _viewangles;
+                hbd.simtime       = CE_FLOAT(pEntity, netvar.m_flSimulationTime);
+                hbd.entorigin     = pEntity->InternalEntity()->GetAbsOrigin();
+                hbd.tickcount     = cmd->tick_count;
 
-        if (CE_BAD(pEntity) || !pEntity->m_bAlivePlayer())
-        {
-            for (BacktrackData &btd : headPositions[i])
-                EmptyBacktrackData(btd);
-            continue;
+                pEntity->hitboxes.InvalidateCache();
+                for (size_t i = 0; i < 18; i++)
+                {
+                    hbd.hitboxes[i].center = pEntity->hitboxes.GetHitbox(i)->center;
+                    hbd.hitboxes[i].min    = pEntity->hitboxes.GetHitbox(i)->min;
+                    hbd.hitboxes[i].max    = pEntity->hitboxes.GetHitbox(i)->max;
+                }
+                hbd.collidable.min    = RAW_ENT(pEntity)->GetCollideable()->OBBMins() + hbd.entorigin;
+                hbd.collidable.max    = RAW_ENT(pEntity)->GetCollideable()->OBBMaxs() + hbd.entorigin;
+                hbd.collidable.center = (hbd.collidable.min + hbd.collidable.max) / 2;
+                memcpy((void *) hbd.bones, (void *) pEntity->hitboxes.bones, sizeof(matrix3x4_t) * 128);
+            }
         }
-        if (pEntity->m_iTeam() == LOCAL_E->m_iTeam())
-            continue;
-        if (pEntity->m_Type() != ENTITY_PLAYER)
-            continue;
-        if (!pEntity->hitboxes.GetHitbox(0))
-            continue;
-        float _viewangles = CE_VECTOR(pEntity, netvar.m_angEyeAngles).y;
-        float viewangles =
-            (_viewangles > 180) ? _viewangles - 360 : _viewangles;
-        float simtime   = CE_FLOAT(pEntity, netvar.m_flSimulationTime);
-        Vector ent_orig = pEntity->InternalEntity()->GetAbsOrigin();
-        std::array<hitboxData, 18> hbdArray;
-        for (size_t i = 0; i < hbdArray.max_size(); i++)
-        {
-            hbdArray.at(i).center = pEntity->hitboxes.GetHitbox(i)->center;
-            hbdArray.at(i).min    = pEntity->hitboxes.GetHitbox(i)->min;
-            hbdArray.at(i).max    = pEntity->hitboxes.GetHitbox(i)->max;
-        }
-        hitboxData collidable{};
-        {
-            collidable.min =
-                RAW_ENT(pEntity)->GetCollideable()->OBBMins() + ent_orig;
-            collidable.max =
-                RAW_ENT(pEntity)->GetCollideable()->OBBMaxs() + ent_orig;
-            collidable.center = (collidable.min + collidable.max) / 2;
-        }
-        auto hdr = g_IModelInfo->GetStudiomodel(RAW_ENT(pEntity)->GetModel());
-        headPositions[i][cmd->command_number % getTicks()] =
-            BacktrackData{ cmd->tick_count,
-                           hbdArray,
-                           collidable,
-                           viewangles,
-                           simtime,
-                           ent_orig,
-                           cmd->command_number % getTicks() };
     }
+
     if (iBestTarget != -1 && CanShoot())
     {
         CachedEntity *tar = ENTITY(iBestTarget);
@@ -163,24 +171,85 @@ void Run()
                     return;
                 auto i          = headPositions[iBestTarget][BestTick];
                 cmd->tick_count = i.tickcount;
-                Vector &angles =
-                    NET_VECTOR(RAW_ENT(tar), netvar.m_angEyeAngles);
-                float &simtime =
-                    NET_FLOAT(RAW_ENT(tar), netvar.m_flSimulationTime);
-                angles.y = i.viewangles;
-                simtime  = i.simtime;
+                Vector &angles  = NET_VECTOR(RAW_ENT(tar), netvar.m_angEyeAngles);
+                float &simtime  = NET_FLOAT(RAW_ENT(tar), netvar.m_flSimulationTime);
+                angles.y        = i.viewangles;
+                simtime         = i.simtime;
             }
         }
     }
 }
-void Draw()
+CatCommand print_bones("debug_print_bones", "debug print bone id + name", []() {
+    if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer())
+        return;
+    // Get player model
+    const model_t *model = RAW_ENT(LOCAL_E)->GetModel();
+    if (not model)
+        return;
+    // Get Studio models (for bones)
+    studiohdr_t *hdr = g_IModelInfo->GetStudiomodel(model);
+    if (not hdr)
+        return;
+    // Get the name of the bones
+    for (int i = 0; i < hdr->numbones; i++)
+        logging::Info(format(std::string(hdr->pBone(i)->pszName()), " ", i).c_str());
+});
+static std::vector<int> bones_leg_r  = { 17, 16, 15 };
+static std::vector<int> bones_leg_l  = { 14, 13, 12 };
+static std::vector<int> bones_bottom = { 15, 1, 12 };
+static std::vector<int> bones_spine  = { 1, 2, 3, 4, 5, 0 };
+static std::vector<int> bones_arm_r  = { 9, 10, 11 };
+static std::vector<int> bones_arm_l  = { 6, 7, 8 };
+static std::vector<int> bones_up     = { 9, 5, 6 };
+
+#if ENABLE_VISUALS
+void DrawBone(std::vector<int> hitbox, std::array<hitboxData, 18> hitboxes)
+{
+    for (int i = 0; i < hitbox.size() - 1; i++)
+    {
+        Vector bone1 = hitboxes.at(hitbox.at(i)).center;
+        Vector bone2 = hitboxes.at(hitbox.at(i + 1)).center;
+        Vector draw_position1, draw_position2;
+        if (draw::WorldToScreen(bone1, draw_position1) && draw::WorldToScreen(bone2, draw_position2))
+            draw::Line(draw_position1.x, draw_position1.y, draw_position2.x - draw_position1.x, draw_position2.y - draw_position1.y, colors::white, 1.0f);
+    }
+}
+#endif
+static void Draw()
 {
 #if ENABLE_VISUALS
     if (!isBacktrackEnabled)
         return;
+    // :b:ones for non drawable ents
+    if (draw_skeleton)
+        for (int i = 0; i <= g_IEngine->GetMaxClients(); i++)
+        {
+            CachedEntity *ent = ENTITY(i);
+            if (CE_BAD(ent) || !ent->m_bAlivePlayer() || i == g_IEngine->GetLocalPlayer())
+                continue;
+            auto head_pos = headPositions[i];
+            // Usable vector instead of ptr to c style array, also used to filter valid and invalid ticks
+            std::vector<BacktrackData> usable;
+            for (int i = 0; i < 66; i++)
+            {
+                if (ValidTick(head_pos[i], ent))
+                    usable.push_back(head_pos[i]);
+            }
+            // Crash much?
+            if (usable.size())
+            {
+                DrawBone(bones_leg_l, usable[0].hitboxes);
+                DrawBone(bones_leg_r, usable[0].hitboxes);
+                DrawBone(bones_bottom, usable[0].hitboxes);
+                DrawBone(bones_spine, usable[0].hitboxes);
+                DrawBone(bones_arm_l, usable[0].hitboxes);
+                DrawBone(bones_arm_r, usable[0].hitboxes);
+                DrawBone(bones_up, usable[0].hitboxes);
+            }
+        }
     if (!draw_bt)
         return;
-    for (int i = 0; i < g_IEngine->GetMaxClients(); i++)
+    for (int i = 0; i <= g_IEngine->GetMaxClients(); i++)
     {
         CachedEntity *ent = ENTITY(i);
         if (CE_BAD(ent))
@@ -204,11 +273,9 @@ void Draw()
                     size = abs(max.y - min.y);
 
                 if (i == iBestTarget && j == BestTick)
-                    glez::draw::rect(out.x, out.y, size / 2, size / 2,
-                                     colors::red);
+                    draw::Rectangle(out.x, out.y, size / 2, size / 2, colors::red);
                 else
-                    glez::draw::rect(out.x, out.y, size / 4, size / 4,
-                                     colors::green);
+                    draw::Rectangle(out.x, out.y, size / 4, size / 4, colors::green);
             }
         }
     }
@@ -223,12 +290,11 @@ bool shouldBacktrack()
     CachedEntity *wep = g_pLocalPlayer->weapon();
     if (CE_BAD(wep))
         return false;
+    if (*slots == 0)
+        return true;
     int slot = re::C_BaseCombatWeapon::GetSlot(RAW_ENT(wep));
     switch ((int) slots)
     {
-    case 0:
-        return true;
-        break;
     case 1:
         if (slot == 0)
             return true;
@@ -256,39 +322,41 @@ bool shouldBacktrack()
     }
     return false;
 }
-
+float getRealLatency()
+{
+    auto ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    if (!ch)
+        return 0.0f;
+    float Latency             = ch->GetLatency(FLOW_OUTGOING);
+    static auto cl_updaterate = g_ICvar->FindVar("cl_updaterate");
+    if (cl_updaterate && cl_updaterate->GetFloat() > 0.001f)
+        Latency += -0.5f / cl_updaterate->GetFloat();
+    else if (!cl_updaterate)
+        cl_updaterate = g_ICvar->FindVar("cl_updaterate");
+    return MAX(0.0f, Latency) * 1000.f;
+}
 float getLatency()
 {
-    return *latency;
+    auto ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    if (!ch)
+        return 0;
+    float Latency = *latency;
+    if (Latency > 1000.0f)
+        Latency = 800.0f;
+    Latency -= getRealLatency();
+    if (Latency < 0.0f)
+        Latency = 0.0f;
+    return Latency;
 }
 
 int getTicks()
 {
-    return max(min(int(*latency / 200.0f * 13.0f) + 12, 65), 12);
+    return max(min(int(getLatency() / 200.0f * 13.0f) + 12, 65), 12);
 }
 
 bool ValidTick(BacktrackData &i, CachedEntity *ent)
 {
-    // TODO: Fix this func
-
-    //    if (istickvalid[ent->m_IDX][i.index])
-    //        return true;
-    //    if (istickinvalid[ent->m_IDX][i.index])
-    //        return false;
-    //    if (IsVectorVisible(g_pLocalPlayer->v_Eye, i.hitboxes[head].center,
-    //    true))
-    //        if (fabsf(NET_FLOAT(RAW_ENT(ent), netvar.m_flSimulationTime) *
-    //        1000.0f -
-    //                  getLatency() - i.simtime * 1000.0f) <= 200.0f)
-    //        {
-    //            istickvalid[ent->m_IDX][i.index] = true;
-    //            return true;
-    //        }
-    //    istickinvalid[ent->m_IDX][i.index] = true;
-    //    return false;
-
-    if (!(fabsf(NET_FLOAT(RAW_ENT(ent), netvar.m_flSimulationTime) * 1000.0f -
-                getLatency() - i.simtime * 1000.0f) < 200.0f))
+    if (!(fabsf(NET_FLOAT(RAW_ENT(ent), netvar.m_flSimulationTime) * 1000.0f - getLatency() - i.simtime * 1000.0f) < 200.0f))
         return false;
     return true;
 }
@@ -301,12 +369,14 @@ void EmptyBacktrackData(BacktrackData &i)
 // This func is internal only
 std::pair<int, int> getBestEntBestTick()
 {
-    int bestEnt  = -1;
-    int bestTick = -1;
+    int bestEnt            = -1;
+    int bestTick           = -1;
+    bool vischeck_priority = false;
+    Vischeck_Success       = false;
     if (GetWeaponMode() == weapon_melee)
     {
         float bestDist = 9999.0f;
-        for (int i = 0; i < g_IEngine->GetMaxClients(); i++)
+        for (int i = 0; i <= g_IEngine->GetMaxClients(); i++)
         {
             CachedEntity *tar = ENTITY(i);
             if (CE_GOOD(tar))
@@ -318,15 +388,14 @@ std::pair<int, int> getBestEntBestTick()
                     {
                         if (ValidTick(headPositions[i][j], ENTITY(i)))
                         {
-                            float dist =
-                                headPositions[i][j]
-                                    .hitboxes.at(spine_3)
-                                    .center.DistTo(g_pLocalPlayer->v_Eye);
-                            if (dist < bestDist && dist > *mindistance)
+                            float dist = headPositions[i][j].hitboxes.at(spine_3).center.DistTo(g_pLocalPlayer->v_Eye);
+                            if (dist < bestDist)
                             {
-                                bestEnt  = i;
-                                bestTick = j;
-                                bestDist = dist;
+                                bestEnt           = i;
+                                bestTick          = j;
+                                bestDist          = dist;
+                                Vischeck_Success  = true;
+                                vischeck_priority = true;
                             }
                         }
                     }
@@ -337,7 +406,7 @@ std::pair<int, int> getBestEntBestTick()
     else
     {
         float bestFov = 180.0f;
-        for (int i = 0; i < g_IEngine->GetMaxClients(); i++)
+        for (int i = 0; i <= g_IEngine->GetMaxClients(); i++)
         {
             CachedEntity *tar = ENTITY(i);
             if (CE_GOOD(tar))
@@ -348,15 +417,20 @@ std::pair<int, int> getBestEntBestTick()
                     {
                         if (ValidTick(headPositions[i][j], tar))
                         {
-                            float FOVDistance = GetFov(
-                                g_pLocalPlayer->v_OrigViewangles,
-                                g_pLocalPlayer->v_Eye,
-                                headPositions[i][j].hitboxes.at(head).center);
-                            if (bestFov > FOVDistance)
+                            float FOVDistance = GetFov(g_pLocalPlayer->v_OrigViewangles, g_pLocalPlayer->v_Eye, headPositions[i][j].hitboxes.at(head).center);
+                            if (FOVDistance > bestFov && vischeck_priority)
+                                continue;
+                            bool Vischeck_suceeded = IsVectorVisible(g_pLocalPlayer->v_Eye, headPositions[i][j].hitboxes.at(0).center, true);
+                            if (FOVDistance < bestFov || (Vischeck_suceeded && !vischeck_priority))
                             {
-                                bestFov  = FOVDistance;
                                 bestEnt  = i;
                                 bestTick = j;
+                                bestFov  = FOVDistance;
+                                if (Vischeck_suceeded)
+                                {
+                                    Vischeck_Success  = true;
+                                    vischeck_priority = true;
+                                }
                             }
                         }
                     }
@@ -366,5 +440,19 @@ std::pair<int, int> getBestEntBestTick()
     }
     return std::make_pair(bestEnt, bestTick);
 }
-
+static InitRoutine EC([]() {
+    EC::Register(EC::LevelInit, Init, "INIT_Backtrack", EC::average);
+    EC::Register(EC::CreateMove, Run, "CM_Backtrack", EC::early);
+#if ENABLE_VISUALS
+    EC::Register(EC::Draw, Draw, "DRAW_Backtrack", EC::average);
+#endif
+});
+static CatCommand debug_flowout("debug_flowout", "test", []() {
+    auto ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    logging::Info("Out Avg: %f In Avg: %f Out current: %f In Current: %f", 1000.0f * ch->GetAvgLatency(FLOW_OUTGOING), 1000.0f * ch->GetAvgLatency(FLOW_INCOMING), 1000.0f * ch->GetLatency(FLOW_OUTGOING), 1000.0f * ch->GetLatency(FLOW_INCOMING));
+});
+static CatCommand debug_richpresence("debug_presence", "Debug stuff", []() {
+    g_ISteamFriends->SetRichPresence("steam_display", "#TF_RichPresence_State_PlayingGeneric");
+    g_ISteamFriends->SetRichPresence("currentmap", "Cathooking");
+});
 } // namespace hacks::shared::backtrack

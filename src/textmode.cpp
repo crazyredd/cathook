@@ -13,21 +13,18 @@ bool *allowSecureServers{ nullptr };
 
 void EXPOSED_Epic_VACBypass_1337_DoNotSteal_xXx_$1_xXx_MLG()
 {
-    // Does not work
-    // ((ICommandLine*(*)(void))dlsym(sharedobj::tier0().lmap,
-    // "CommandLine_Tier0"))()->RemoveParm("-textmode");
-    // ((ICommandLine*(*)(void))dlsym(sharedobj::tier0().lmap,
-    // "CommandLine_Tier0"))()->RemoveParm("-insecure");
-    static unsigned char patch[] = { 0x55, 0x89, 0xE5, 0x83, 0xEC, 0x18, 0xB8,
-                                     0x01, 0x00, 0x00, 0x00, 0xC9, 0xC3 };
-    uintptr_t Host_IsSecureServerAllowed_addr = gSignatures.GetEngineSignature(
-        "55 89 E5 83 EC ? E8 ? ? ? ? 8B 10 C7 44 24 ? ? ? ? ? 89 04 24 FF 52 ? "
-        "85 C0 74 ? C6 05");
+    ((ICommandLine * (*) (void) ) dlsym(sharedobj::tier0().lmap, "CommandLine_Tier0"))()->RemoveParm("-textmode");
+    ((ICommandLine * (*) (void) ) dlsym(sharedobj::tier0().lmap, "CommandLine_Tier0"))()->RemoveParm("-insecure");
+    uintptr_t Host_IsSecureServerAllowed_addr  = gSignatures.GetEngineSignature("55 89 E5 83 EC ? E8 ? ? ? ? 8B 10 C7 44 24 ? ? ? ? ? 89 04 24 FF 52 ? 85 C0 74 ? C6 05");
+    uintptr_t Host_IsSecureServerAllowed2_addr = gSignatures.GetEngineSignature("55 89 E5 83 EC ? E8 ? ? ? ? 8B 10 C7 44 24 ? ? ? ? ? 89 04 24 FF 52 ? 85 C0 0F");
     // +0x21 = allowSecureServers
     // logging::Info("1337 VAC bypass: 0x%08x",
     // Host_IsSecureServerAllowed_addr);
-    Patch((void *) Host_IsSecureServerAllowed_addr, (void *) patch,
-          sizeof(patch));
+    static BytePatch HostSecureServer(Host_IsSecureServerAllowed_addr, { 0x55, 0x89, 0xE5, 0x83, 0xEC, 0x18, 0x31, 0xC0, 0x40, 0xC9, 0xC3 });
+    static BytePatch HostSecureServer2(Host_IsSecureServerAllowed2_addr, { 0x31, 0xC0, 0x40, 0xC3 });
+    HostSecureServer.Patch();
+    HostSecureServer2.Patch();
+
     uintptr_t allowSecureServers_addr = Host_IsSecureServerAllowed_addr + 0x21;
     allowSecureServers                = *(bool **) (allowSecureServers_addr);
     logging::Info("Allow Secure Servers: 0x%08x", allowSecureServers);
@@ -35,11 +32,9 @@ void EXPOSED_Epic_VACBypass_1337_DoNotSteal_xXx_$1_xXx_MLG()
     logging::Info("Allow Secure Servers: %d", *allowSecureServers);
 }
 
-CatCommand fixvac("fixvac", "Lemme in to secure servers", []() {
-    EXPOSED_Epic_VACBypass_1337_DoNotSteal_xXx_$1_xXx_MLG();
-});
+CatCommand fixvac("fixvac", "Lemme in to secure servers", []() { EXPOSED_Epic_VACBypass_1337_DoNotSteal_xXx_$1_xXx_MLG(); });
 
-static InitRoutine init([]() {
+static InitRoutine init_textmode([]() {
 #if ENABLE_TEXTMODE_STDIN
     logging::Info("[TEXTMODE] Setting up input handling");
     int flags = fcntl(0, F_GETFL, 0);

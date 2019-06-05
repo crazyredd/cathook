@@ -42,9 +42,9 @@ bool trace::FilterDefault::ShouldHitEntity(IHandleEntity *handle, int mask)
     switch (clazz->m_ClassID)
     {
     // TODO magic numbers: invisible entity ids
-    case 64:
-    case 225:
-    case 55:
+    case CL_CLASS(CFuncRespawnRoomVisualizer):
+    case CL_CLASS(CTFMedigunShield):
+    case CL_CLASS(CFuncAreaPortalWindow):
         return false;
     }
     /* Do not hit yourself. Idiot. */
@@ -86,6 +86,7 @@ bool trace::FilterNoPlayer::ShouldHitEntity(IHandleEntity *handle, int mask)
         return false;
     entity = (IClientEntity *) handle;
     clazz  = entity->GetClientClass();
+
     /* Ignore invisible entities that we don't wanna hit */
     switch (clazz->m_ClassID)
     {
@@ -129,6 +130,21 @@ void trace::FilterNoEntity::SetSelf(IClientEntity *self)
 
 bool trace::FilterNoEntity::ShouldHitEntity(IHandleEntity *handle, int mask)
 {
+    IClientEntity *entity;
+    ClientClass *clazz;
+
+    if (!handle)
+        return false;
+    entity = (IClientEntity *) handle;
+    clazz  = entity->GetClientClass();
+
+    // Hit doors, carts, etc
+    switch (clazz->m_ClassID)
+    {
+    case 6:
+    case 7:
+        return true;
+    }
     return false;
 }
 

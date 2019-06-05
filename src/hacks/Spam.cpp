@@ -10,15 +10,15 @@
 #include "common.hpp"
 #include "MiscTemporary.hpp"
 
+namespace hacks::shared::spam
+{
 static settings::Int spam_source{ "spam.source", "0" };
-static settings::Bool random_order{ "spam.random", "0" };
+static settings::Boolean random_order{ "spam.random", "0" };
 static settings::String filename{ "spam.filename", "spam.txt" };
 static settings::Int spam_delay{ "spam.delay", "800" };
 static settings::Int voicecommand_spam{ "spam.voicecommand", "0" };
-static settings::Bool teamname_spam{ "spam.teamname", "0" };
-
-namespace hacks::shared::spam
-{
+static settings::Boolean teamname_spam{ "spam.teamname", "0" };
+static settings::Boolean team_only{ "spam.teamchat", "false" };
 
 static int last_index;
 
@@ -86,17 +86,14 @@ bool PlayerPassesQuery(Query query, int idx)
         if (!(clazzBit & static_cast<int>(query.flags_class)))
             return false;
     }
-    if (query.flags & (static_cast<int>(QueryFlags::TEAMMATES) |
-                       static_cast<int>(QueryFlags::ENEMIES)))
+    if (query.flags & (static_cast<int>(QueryFlags::TEAMMATES) | static_cast<int>(QueryFlags::ENEMIES)))
     {
         if (!teammate && !(query.flags & static_cast<int>(QueryFlags::ENEMIES)))
             return false;
-        if (teammate &&
-            !(query.flags & static_cast<int>(QueryFlags::TEAMMATES)))
+        if (teammate && !(query.flags & static_cast<int>(QueryFlags::TEAMMATES)))
             return false;
     }
-    if (query.flags & (static_cast<int>(QueryFlags::ALIVE) |
-                       static_cast<int>(QueryFlags::DEAD)))
+    if (query.flags & (static_cast<int>(QueryFlags::ALIVE) | static_cast<int>(QueryFlags::DEAD)))
     {
         if (!alive && !(query.flags & static_cast<int>(QueryFlags::DEAD)))
             return false;
@@ -140,22 +137,19 @@ Query QueryFromSubstring(const std::string &string)
                 result.flags_class |= static_cast<int>(QueryFlagsClass::SCOUT);
                 break;
             case '2':
-                result.flags_class |=
-                    static_cast<int>(QueryFlagsClass::SOLDIER);
+                result.flags_class |= static_cast<int>(QueryFlagsClass::SOLDIER);
                 break;
             case '3':
                 result.flags_class |= static_cast<int>(QueryFlagsClass::PYRO);
                 break;
             case '4':
-                result.flags_class |=
-                    static_cast<int>(QueryFlagsClass::DEMOMAN);
+                result.flags_class |= static_cast<int>(QueryFlagsClass::DEMOMAN);
                 break;
             case '5':
                 result.flags_class |= static_cast<int>(QueryFlagsClass::HEAVY);
                 break;
             case '6':
-                result.flags_class |=
-                    static_cast<int>(QueryFlagsClass::ENGINEER);
+                result.flags_class |= static_cast<int>(QueryFlagsClass::ENGINEER);
                 break;
             case '7':
                 result.flags_class |= static_cast<int>(QueryFlagsClass::MEDIC);
@@ -176,10 +170,7 @@ int QueryPlayer(Query query)
 {
     if (query.flags & static_cast<int>(QueryFlags::STATIC))
     {
-        if (current_static_index &&
-            (query.flags & static_query.flags) == static_query.flags &&
-            (query.flags_class & static_query.flags_class) ==
-                static_query.flags_class)
+        if (current_static_index && (query.flags & static_query.flags) == static_query.flags && (query.flags_class & static_query.flags_class) == static_query.flags_class)
         {
             if (PlayerPassesQuery(query, current_static_index))
             {
@@ -189,7 +180,7 @@ int QueryPlayer(Query query)
     }
     std::vector<int> candidates{};
     int index_result = 0;
-    for (int i = 1; i < g_IEngine->GetMaxClients(); i++)
+    for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
     {
         if (PlayerPassesQuery(query, i))
         {
@@ -232,7 +223,7 @@ bool SubstituteQueries(std::string &input)
 
 bool FormatSpamMessage(std::string &message)
 {
-    ReplaceString(message, "\\n", "\n");
+    ReplaceSpecials(message);
     bool team       = g_pLocalPlayer->team - 2;
     bool enemy_team = !team;
     IF_GAME(IsTF2())
@@ -241,14 +232,6 @@ bool FormatSpamMessage(std::string &message)
         ReplaceString(message, "%enemyteam%", teams[enemy_team]);
     }
     return SubstituteQueries(message);
-}
-
-void init()
-{
-    filename.installChangeCallback(
-        [](settings::VariableBase<std::string> &var, std::string after) {
-            file.TryLoad(after);
-        });
 }
 
 void createMove()
@@ -276,16 +259,13 @@ void createMove()
 
         if (voicecommand_spam)
         {
-            static float last_voice_spam = 0.0f;
-            if (g_GlobalVars->curtime - 4.0F > last_voice_spam)
+            static Timer last_voice_spam;
+            if (last_voice_spam.test_and_set(4000))
             {
-                switch ((int) voicecommand_spam)
+                switch (*voicecommand_spam)
                 {
                 case 1: // RANDOM
-                    g_IEngine->ServerCmd(
-                        format("voicemenu ", floor(RandFloatRange(0, 2.9)), " ",
-                               floor(RandFloatRange(0, 8.9)))
-                            .c_str());
+                    g_IEngine->ServerCmd(format("voicemenu ", UniformRandomInt(0, 2), " ", UniformRandomInt(0, 8)).c_str());
                     break;
                 case 2: // MEDIC
                     g_IEngine->ServerCmd("voicemenu 0 0");
@@ -302,7 +282,6 @@ void createMove()
                 case 6: // JEERS
                     g_IEngine->ServerCmd("voicemenu 2 3");
                 }
-                last_voice_spam = g_GlobalVars->curtime;
             }
         }
     }
@@ -312,10 +291,10 @@ void createMove()
     static int safety_ticks   = 0;
     static int last_source    = 0;
     static float last_message = 0;
-    if ((int) spam_source != last_source)
+    if (*spam_source != last_source)
     {
         safety_ticks = 300;
-        last_source  = (int) spam_source;
+        last_source  = *spam_source;
     }
     if (safety_ticks > 0)
     {
@@ -328,7 +307,7 @@ void createMove()
     }
 
     const std::vector<std::string> *source = nullptr;
-    switch ((int) spam_source)
+    switch (*spam_source)
     {
     case 1:
         source = &file.lines;
@@ -356,18 +335,17 @@ void createMove()
     }
     if (!source || !source->size())
         return;
-    if (std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now() - last_spam_point)
-            .count() > int(spam_delay))
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - last_spam_point).count() > int(spam_delay))
     {
         if (chat_stack::stack.empty())
         {
             if (current_index >= source->size())
                 current_index = 0;
-            if (random_order)
+            if (random_order && source->size())
             {
                 current_index = rand() % source->size();
-                while (current_index == last_index)
+                int tries     = 0;
+                while (current_index == last_index && tries++ < 1000)
                 {
                     current_index = rand() % source->size();
                 }
@@ -375,7 +353,7 @@ void createMove()
             last_index             = current_index;
             std::string spamString = source->at(current_index);
             if (FormatSpamMessage(spamString))
-                chat_stack::Say(spamString, false);
+                chat_stack::Say(spamString, *team_only);
             current_index++;
         }
         last_spam_point = std::chrono::system_clock::now();
@@ -392,46 +370,32 @@ bool isActive()
     return bool(spam_source);
 }
 
-const std::vector<std::string> builtin_default = {
-    "Cathook - more fun than a ball of yarn!", "GNU/Linux is the best OS!",
-    "Visit https://github.com/nullworks/cathook for more information!",
-    "Cathook - Free and Open-Source tf2 cheat!",
-    "Cathook - ca(n)t stop me meow!"
-};
-const std::vector<std::string> builtin_lennyfaces = {
-    "( ͡° ͜ʖ ͡°)",  "( ͡°( ͡° ͜ʖ( ͡° ͜ʖ ͡°)ʖ ͡°) ͡°)",
-    "ʕ•ᴥ•ʔ",     "(▀̿Ĺ̯▀̿ ̿)",
-    "( ͡°╭͜ʖ╮͡° )", "(ง'̀-'́)ง",
-    "(◕‿◕✿)",    "༼ つ  ͡° ͜ʖ ͡° ༽つ"
-};
-const std::vector<std::string> builtin_blanks = {
-    ". \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n "
-};
+void init()
+{
+    spam_source.installChangeCallback([](settings::VariableBase<int> &var, int after) { file.Load(*filename); });
+    filename.installChangeCallback([](settings::VariableBase<std::string> &var, std::string after) { file.TryLoad(after); });
+    reloadSpamFile();
+}
 
-const std::vector<std::string> builtin_nonecore = {
-    "NULL CORE - REDUCE YOUR RISK OF BEING OWNED!",
-    "NULL CORE - WAY TO THE TOP!",
-    "NULL CORE - BEST TF2 CHEAT!",
-    "NULL CORE - NOW WITH BLACKJACK AND HOOKERS!",
-    "NULL CORE - BUTTHURT IN 10 SECONDS FLAT!",
-    "NULL CORE - WHOLE SERVER OBSERVING!",
-    "NULL CORE - GET BACK TO PWNING!",
-    "NULL CORE - WHEN PVP IS TOO HARDCORE!",
-    "NULL CORE - CAN CAUSE KIDS TO RAGE!",
-    "NULL CORE - F2P NOOBS WILL BE 100% NERFED!"
-};
-const std::vector<std::string> builtin_lmaobox = {
-    "GET GOOD, GET LMAOBOX!", "LMAOBOX - WAY TO THE TOP",
-    "WWW.LMAOBOX.NET - BEST FREE TF2 HACK!"
-};
-const std::vector<std::string> builtin_lithium = {
-    "CHECK OUT www.YouTube.com/c/DurRud FOR MORE INFORMATION!",
-    "PWNING AIMBOTS WITH OP ANTI-AIMS SINCE 2015 - LITHIUMCHEAT",
-    "STOP GETTING MAD AND STABILIZE YOUR MOOD WITH LITHIUMCHEAT!",
-    "SAVE YOUR MONEY AND GET LITHIUMCHEAT! IT IS FREE!",
-    "GOT ROLLED BY LITHIUM? HEY, THAT MEANS IT'S TIME TO GET LITHIUMCHEAT!!"
-};
+const std::vector<std::string> builtin_default    = { "Cathook - more fun than a ball of yarn!", "GNU/Linux is the best OS!", "Visit https://github.com/nullworks/cathook for more information!", "Cathook - Free and Open-Source tf2 cheat!", "Cathook - ca(n)t stop me meow!" };
+const std::vector<std::string> builtin_lennyfaces = { "( ͡° ͜ʖ ͡°)", "( ͡°( ͡° ͜ʖ( ͡° ͜ʖ ͡°)ʖ ͡°) ͡°)", "ʕ•ᴥ•ʔ", "(▀̿Ĺ̯▀̿ ̿)", "( ͡°╭͜ʖ╮͡° )", "(ง'̀-'́)ง", "(◕‿◕✿)", "༼ つ  ͡° ͜ʖ ͡° ༽つ" };
+const std::vector<std::string> builtin_blanks     = { "\e"
+                                                  "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                                                  "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                                                  "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                                                  "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                                                  "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                                                  "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                                                  "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" };
+
+const std::vector<std::string> builtin_nonecore = { "NULL CORE - REDUCE YOUR RISK OF BEING OWNED!", "NULL CORE - WAY TO THE TOP!", "NULL CORE - BEST TF2 CHEAT!", "NULL CORE - NOW WITH BLACKJACK AND HOOKERS!", "NULL CORE - BUTTHURT IN 10 SECONDS FLAT!", "NULL CORE - WHOLE SERVER OBSERVING!", "NULL CORE - GET BACK TO PWNING!", "NULL CORE - WHEN PVP IS TOO HARDCORE!", "NULL CORE - CAN CAUSE KIDS TO RAGE!", "NULL CORE - F2P NOOBS WILL BE 100% NERFED!" };
+const std::vector<std::string> builtin_lmaobox  = { "GET GOOD, GET LMAOBOX!", "LMAOBOX - WAY TO THE TOP", "WWW.LMAOBOX.NET - BEST FREE TF2 HACK!" };
+const std::vector<std::string> builtin_lithium  = { "CHECK OUT www.YouTube.com/c/DurRud FOR MORE INFORMATION!", "PWNING AIMBOTS WITH OP ANTI-AIMS SINCE 2015 - LITHIUMCHEAT", "STOP GETTING MAD AND STABILIZE YOUR MOOD WITH LITHIUMCHEAT!", "SAVE YOUR MONEY AND GET LITHIUMCHEAT! IT IS FREE!", "GOT ROLLED BY LITHIUM? HEY, THAT MEANS IT'S TIME TO GET LITHIUMCHEAT!!" };
+
+static InitRoutine EC([]() {
+    EC::Register(EC::CreateMove, createMove, "spam", EC::average);
+    init();
+});
+
+static CatCommand reload_cc("spam_reload", "Reload spam file", hacks::shared::spam::reloadSpamFile);
 } // namespace hacks::shared::spam
-
-static CatCommand reload("spam_reload", "Reload spam file",
-                         hacks::shared::spam::reloadSpamFile);

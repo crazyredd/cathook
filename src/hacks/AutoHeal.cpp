@@ -6,68 +6,67 @@
  */
 
 #include "common.hpp"
-#include <hacks/AutoHeal.hpp>
-#include <hacks/FollowBot.hpp>
-#include <settings/Bool.hpp>
-
-static settings::Bool enable{ "autoheal.enable", "false" };
-static settings::Bool silent{ "autoheal.silent", "true" };
-static settings::Bool pop_uber_auto{ "autoheal.uber.enable", "true" };
-static settings::Float pop_uber_percent{ "autoheal.uber.health-below-ratio",
-                                         "0" };
-static settings::Bool share_uber{ "autoheal.uber.share", "true" };
-
-static settings::Bool auto_vacc{ "autoheal.vacc.enable", "false" };
-
-static settings::Bool auto_vacc_bullets{ "autoheal.vacc.bullet.enable",
-                                         "true" };
-static settings::Int vacc_sniper{ "autoheal.vacc.bullet.sniper-pop", "true" };
-
-static settings::Bool auto_vacc_fire_checking{ "autoheal.vacc.fire.enable",
-                                               "true" };
-static settings::Int auto_vacc_pop_if_pyro{ "autoheal.vacc.fire.pyro-pop",
-                                            "1" };
-static settings::Bool auto_vacc_check_on_fire{
-    "autoheal.vacc.fire.prevent-afterburn", "true"
-};
-static settings::Int auto_vacc_pyro_range{ "autoheal.vacc.fire.pyro-range",
-                                           "450" };
-
-static settings::Bool auto_vacc_blast_checking{ "autoheal.vacc.blast.enable",
-                                                "true" };
-static settings::Bool auto_vacc_blast_crit_pop{ "autoheal.vacc.blast.crit-pop",
-                                                "true" };
-static settings::Int auto_vacc_blast_health{
-    "autoheal.vacc.blast.pop-near-rocket-health", "80"
-};
-static settings::Int auto_vacc_proj_danger_range{
-    "autoheal.vacc.blast.danger-range", "650"
-};
-
-static settings::Int change_timer{ "autoheal.vacc.reset-timer", "200" };
-
-static settings::Int auto_vacc_bullet_pop_ubers{
-    "autoheal.vacc.bullet.min-charges", "0"
-};
-static settings::Int auto_vacc_fire_pop_ubers{ "autoheal.vacc.fire.min-charges",
-                                               "0" };
-static settings::Int auto_vacc_blast_pop_ubers{
-    "autoheal.vacc.blast.min-charges", "0"
-};
-
-static settings::Int default_resistance{ "autoheal.vacc.default-resistance",
-                                         "0" };
+#include "hacks/FollowBot.hpp"
+#include "settings/Bool.hpp"
+#include "PlayerTools.hpp"
 
 namespace hacks::tf::autoheal
 {
+static settings::Boolean enable{ "autoheal.enable", "false" };
+static settings::Boolean steamid_only{ "autoheal.steam-only", "false" };
+static settings::Boolean silent{ "autoheal.silent", "true" };
+static settings::Boolean pop_uber_auto{ "autoheal.uber.enable", "true" };
+static settings::Float pop_uber_percent{ "autoheal.uber.health-below-ratio", "0" };
+static settings::Boolean share_uber{ "autoheal.uber.share", "true" };
 
-int m_iCurrentHealingTarget{ -1 };
-int m_iNewTarget{ 0 };
+static settings::Boolean auto_vacc{ "autoheal.vacc.enable", "false" };
+
+static settings::Int vacc_sniper{ "autoheal.vacc.bullet.sniper-pop", "1" };
+static settings::Int vacc_sniper_fov{ "autoheal.vacc.bullet.sniper-fov", "20" };
+
+static settings::Boolean auto_vacc_fire_checking{ "autoheal.vacc.fire.enable", "true" };
+static settings::Int auto_vacc_pop_if_pyro{ "autoheal.vacc.fire.pyro-pop", "1" };
+static settings::Boolean auto_vacc_check_on_fire{ "autoheal.vacc.fire.prevent-afterburn", "true" };
+static settings::Int auto_vacc_pyro_range{ "autoheal.vacc.fire.pyro-range", "450" };
+
+static settings::Boolean auto_vacc_blast_checking{ "autoheal.vacc.blast.enable", "true" };
+static settings::Boolean auto_vacc_blast_crit_pop{ "autoheal.vacc.blast.crit-pop", "true" };
+static settings::Int auto_vacc_blast_health{ "autoheal.vacc.blast.pop-near-rocket-health", "80" };
+static settings::Int auto_vacc_proj_danger_range{ "autoheal.vacc.blast.danger-range", "650" };
+
+static settings::Int change_timer{ "autoheal.vacc.reset-timer", "200" };
+
+static settings::Int auto_vacc_bullet_pop_ubers{ "autoheal.vacc.bullet.min-charges", "0" };
+static settings::Int auto_vacc_fire_pop_ubers{ "autoheal.vacc.fire.min-charges", "0" };
+static settings::Int auto_vacc_blast_pop_ubers{ "autoheal.vacc.blast.min-charges", "0" };
+
+static settings::Int default_resistance{ "autoheal.vacc.default-resistance", "0" };
+static settings::Int steam_var{ "autoheal.steamid", "0" };
+
+struct patient_data_s
+{
+    float last_damage{ 0.0f };
+    int last_health{ 0 };
+    int accum_damage{ 0 }; // accumulated damage over X seconds (data stored for AT least 5 seconds)
+    float accum_damage_start{ 0.0f };
+};
+
+int CurrentHealingTargetIDX{ 0 };
 
 int vaccinator_change_stage = 0;
 int vaccinator_change_ticks = 0;
 int vaccinator_ideal_resist = 0;
 int vaccinator_change_timer = 0;
+
+std::array<Timer, 32> reset_cd{};
+std::vector<patient_data_s> data(32);
+
+struct proj_data_s
+{
+    int eid;
+    Vector last_pos;
+};
+std::vector<proj_data_s> proj_data_array;
 
 int ChargeCount()
 {
@@ -77,33 +76,45 @@ int ChargeCount()
 // TODO Angle Checking
 int BulletDangerValue(CachedEntity *patient)
 {
-    // Find zoomed in snipers in other team
+    if (!vacc_sniper)
+        return 0;
     bool any_zoomed_snipers = false;
-    for (int i = 1; i < 32 && i < HIGHEST_ENTITY; i++)
+    // Find dangerous snipers in other team
+    for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
     {
         CachedEntity *ent = ENTITY(i);
         if (CE_BAD(ent))
             continue;
-        if (!ent->m_bEnemy())
+        if (!ent->m_bAlivePlayer() || !ent->m_bEnemy())
             continue;
         if (g_pPlayerResource->GetClass(ent) != tf_sniper)
             continue;
-        if (CE_BYTE(ent, netvar.iLifeState))
-            continue;
         if (!HasCondition<TFCond_Zoomed>(ent))
             continue;
+        if (!player_tools::shouldTarget(ent))
+            continue;
         any_zoomed_snipers = true;
-        // TODO VisCheck from patient.
-        if ((int) vacc_sniper == 1)
-            if (!IsEntityVisible(ent, head) &&
-                !IsVectorVisible(ENTITY(m_iCurrentHealingTarget)
-                                     ->hitboxes.GetHitbox(head)
-                                     ->center,
-                                 ent->hitboxes.GetHitbox(head)->center, true))
-                continue;
-        return vacc_sniper ? 2 : 1;
+        if (*vacc_sniper == 2)
+        {
+            // If vacc_sniper == 2 ("Any zoomed") then return 2
+            // Why would you want this?????
+            return 2;
+        }
+        else
+        {
+            if (IsEntityVisible(ent, head))
+            {
+                if (playerlist::AccessData(ent).state == playerlist::k_EState::RAGE)
+                    return 2;
+                else
+                {
+                    if (GetFov(ent->m_vecAngle(), ent->hitboxes.GetHitbox(head)->center, patient->hitboxes.GetHitbox(head)->center) < *vacc_sniper_fov)
+                        return 2;
+                }
+            }
+        }
     }
-    return any_zoomed_snipers;
+    return any_zoomed_snipers ? 1 : 0;
 }
 
 int FireDangerValue(CachedEntity *patient)
@@ -111,46 +122,45 @@ int FireDangerValue(CachedEntity *patient)
     // Find nearby pyros
     if (!auto_vacc_fire_checking)
         return 0;
+    uint8_t should_switch = 0;
     if (auto_vacc_pop_if_pyro)
     {
-        for (int i = 1; i < 32 && i < HIGHEST_ENTITY; i++)
+        for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
         {
             CachedEntity *ent = ENTITY(i);
             if (CE_BAD(ent))
                 continue;
             if (!ent->m_bEnemy())
                 continue;
+            if (!ent->m_bAlivePlayer())
+                continue;
+            if (!player_tools::shouldTarget(ent))
+                continue;
             if (g_pPlayerResource->GetClass(ent) != tf_pyro)
                 continue;
-            if (CE_BYTE(ent, netvar.iLifeState))
+            if (patient->m_vecOrigin().DistTo(ent->m_vecOrigin()) > (int) auto_vacc_pyro_range)
                 continue;
-            if (patient->m_vecOrigin().DistTo(ent->m_vecOrigin()) >
-                (int) auto_vacc_pyro_range)
-                continue;
-            if ((int) auto_vacc_pop_if_pyro == 2)
+            if (*auto_vacc_pop_if_pyro == 2)
                 return 2;
-            IClientEntity *pyro_weapon = g_IEntityList->GetClientEntity(
-                CE_INT(ent, netvar.hActiveWeapon) & 0xFFF);
-            return (pyro_weapon && pyro_weapon->GetClientClass()->m_ClassID ==
-                                       CL_CLASS(CTFFlameThrower))
-                       ? 2
-                       : 0;
+            CachedEntity *weapon = ENTITY(HandleToIDX(CE_INT(ent, netvar.hActiveWeapon)));
+            if (CE_GOOD(weapon) && weapon->m_iClassID() == CL_CLASS(CTFFlameThrower))
+            {
+                if (HasCondition<TFCond_OnFire>(patient))
+                    return 2;
+                else
+                    should_switch = 1;
+            }
         }
     }
-    if (HasCondition<TFCond_OnFire>(patient))
+    if (*auto_vacc_check_on_fire && HasCondition<TFCond_OnFire>(patient))
     {
-        return (bool) auto_vacc_check_on_fire;
+        if (patient->m_iHealth() < 35)
+            return 2;
+        else
+            should_switch = 1;
     }
-    return 0;
+    return should_switch;
 }
-
-struct proj_data_s
-{
-    int eid;
-    Vector last_pos;
-};
-
-std::vector<proj_data_s> proj_data_array;
 
 int BlastDangerValue(CachedEntity *patient)
 {
@@ -166,8 +176,7 @@ int BlastDangerValue(CachedEntity *patient)
         if (CE_GOOD(ent))
         {
             // Rocket is getting closer
-            if (patient->m_vecOrigin().DistToSqr(d.last_pos) >
-                patient->m_vecOrigin().DistToSqr(ent->m_vecOrigin()))
+            if (patient->m_vecOrigin().DistToSqr(d.last_pos) > patient->m_vecOrigin().DistToSqr(ent->m_vecOrigin()))
             {
                 if (ent->m_bCritProjectile())
                     hasCritRockets = true;
@@ -182,14 +191,13 @@ int BlastDangerValue(CachedEntity *patient)
     }
     if (hasRockets)
     {
-        if (patient->m_iHealth() < (int) auto_vacc_blast_health ||
-            (auto_vacc_blast_crit_pop && hasCritRockets))
+        if (patient->m_iHealth() < (int) auto_vacc_blast_health || (auto_vacc_blast_crit_pop && hasCritRockets))
         {
             return 2;
         }
         return 1;
     }
-    // Find crit rockets/pipes nearby
+    // Find rockets/pipes nearby
     for (int i = 32; i < HIGHEST_ENTITY; i++)
     {
         CachedEntity *ent = ENTITY(i);
@@ -199,8 +207,9 @@ int BlastDangerValue(CachedEntity *patient)
             continue;
         if (ent->m_Type() != ENTITY_PROJECTILE)
             continue;
-        if (patient->m_vecOrigin().DistTo(ent->m_vecOrigin()) >
-            (int) auto_vacc_proj_danger_range)
+        if (ent->m_iClassID() == CL_CLASS(CTFProjectile_Flare))
+            continue;
+        if (patient->m_vecOrigin().DistTo(ent->m_vecOrigin()) > (int) auto_vacc_proj_danger_range)
             continue;
         proj_data_array.push_back(proj_data_s{ i, ent->m_vecOrigin() });
     }
@@ -216,21 +225,13 @@ int CurrentResistance()
 
 bool IsProjectile(CachedEntity *ent)
 {
-    return (ent->m_iClassID() == CL_CLASS(CTFProjectile_Rocket) ||
-            ent->m_iClassID() == CL_CLASS(CTFProjectile_Flare) ||
-            ent->m_iClassID() == CL_CLASS(CTFProjectile_EnergyBall) ||
-            ent->m_iClassID() == CL_CLASS(CTFProjectile_HealingBolt) ||
-            ent->m_iClassID() == CL_CLASS(CTFProjectile_Arrow) ||
-            ent->m_iClassID() == CL_CLASS(CTFProjectile_SentryRocket) ||
-            ent->m_iClassID() == CL_CLASS(CTFProjectile_Cleaver) ||
-            ent->m_iClassID() == CL_CLASS(CTFGrenadePipebombProjectile) ||
-            ent->m_iClassID() == CL_CLASS(CTFProjectile_EnergyRing));
+    return (ent->m_iClassID() == CL_CLASS(CTFProjectile_Rocket) || ent->m_iClassID() == CL_CLASS(CTFProjectile_Flare) || ent->m_iClassID() == CL_CLASS(CTFProjectile_EnergyBall) || ent->m_iClassID() == CL_CLASS(CTFProjectile_HealingBolt) || ent->m_iClassID() == CL_CLASS(CTFProjectile_Arrow) || ent->m_iClassID() == CL_CLASS(CTFProjectile_SentryRocket) || ent->m_iClassID() == CL_CLASS(CTFProjectile_Cleaver) || ent->m_iClassID() == CL_CLASS(CTFGrenadePipebombProjectile) || ent->m_iClassID() == CL_CLASS(CTFProjectile_EnergyRing));
 }
 
 int NearbyEntities()
 {
     int ret = 0;
-    if (CE_BAD(LOCAL_E))
+    if (CE_BAD(LOCAL_E) || CE_BAD(LOCAL_W))
         return ret;
     for (int i = 0; i < HIGHEST_ENTITY; i++)
     {
@@ -249,8 +250,7 @@ int NearbyEntities()
 
 int OptimalResistance(CachedEntity *patient, bool *shouldPop)
 {
-    int bd = BlastDangerValue(patient), fd = FireDangerValue(patient),
-        hd = BulletDangerValue(patient);
+    int bd = BlastDangerValue(patient), fd = FireDangerValue(patient), hd = BulletDangerValue(patient);
     if (shouldPop)
     {
         int charges = ChargeCount();
@@ -291,12 +291,14 @@ void DoResistSwitching()
 {
     if (vaccinator_change_timer > 0)
     {
-        if (vaccinator_change_timer == 1)
+        if (vaccinator_change_timer == 1 && *default_resistance)
         {
-            SetResistance((int) default_resistance);
+            SetResistance(*default_resistance - 1);
         }
         vaccinator_change_timer--;
     }
+    else
+        vaccinator_change_timer = *change_timer;
     if (!vaccinator_change_stage)
         return;
     if (CurrentResistance() == vaccinator_ideal_resist)
@@ -325,42 +327,34 @@ void DoResistSwitching()
     }
 }
 
-int force_healing_target{ 0 };
-static CatCommand heal_steamid(
-    "autoheal_heal_steamid", "Heals a player with SteamID",
-    [](const CCommand &args) {
-        if (args.ArgC() < 2)
-        {
-            logging::Info("Invalid call!");
-            force_healing_target = 0;
-            return;
-        }
-        if (strtol(args.Arg(1), nullptr, 10) == 0x0)
-        {
-            force_healing_target = 0;
-            return;
-        }
-        for (int i = 1; i <= 32 && i < HIGHEST_ENTITY; i++)
-        {
-            CachedEntity *ent = ENTITY(i);
-            if (CE_BAD(ent))
-                continue;
-            if (ent->m_Type() != ENTITY_PLAYER)
-                continue;
-            if (ent->player_info.friendsID == std::stoul(args.Arg(1)))
-            {
-                force_healing_target = i;
-                return;
-            }
-        }
-    });
+unsigned int steamid = 0;
 
-static CatCommand vaccinator_bullet("vacc_bullet", "Bullet Vaccinator",
-                                    []() { SetResistance(0); });
-static CatCommand vaccinator_blast("vacc_blast", "Blast Vaccinator",
-                                   []() { SetResistance(1); });
-static CatCommand vaccinator_fire("vacc_fire", "Fire Vaccinator",
-                                  []() { SetResistance(2); });
+static CatCommand heal_steamid("autoheal_heal_steamid", "Heals a player with SteamID", [](const CCommand &args) {
+    if (args.ArgC() < 2)
+    {
+        logging::Info("Invalid call!");
+        steam_var = 0;
+        return;
+    }
+    if (strtol(args.Arg(1), nullptr, 10) == 0x0)
+    {
+        steam_var = 0;
+        return;
+    }
+    try
+    {
+        steam_var = std::stoul(args.Arg(1));
+    }
+    catch (std::invalid_argument)
+    {
+        logging::Info("Invalid steamid! Setting current to null.");
+        steam_var = 0;
+    }
+});
+
+static CatCommand vaccinator_bullet("vacc_bullet", "Bullet Vaccinator", []() { SetResistance(0); });
+static CatCommand vaccinator_blast("vacc_blast", "Blast Vaccinator", []() { SetResistance(1); });
+static CatCommand vaccinator_fire("vacc_fire", "Fire Vaccinator", []() { SetResistance(2); });
 
 bool IsPopped()
 {
@@ -372,10 +366,11 @@ bool IsPopped()
 
 bool ShouldChargePlayer(int idx)
 {
-    CachedEntity *target = ENTITY(idx);
-    const float damage_accum_duration =
-        g_GlobalVars->curtime - data[idx].accum_damage_start;
-    const int health = target->m_iHealth();
+    CachedEntity *target              = ENTITY(idx);
+    const float damage_accum_duration = g_GlobalVars->curtime - data[idx].accum_damage_start;
+    const int health                  = target->m_iHealth();
+    if (health > g_pPlayerResource->GetMaxHealth(target))
+        return false;
     if (!data[idx].accum_damage_start)
         return false;
     if (health > 30 && data[idx].accum_damage < 45)
@@ -394,12 +389,12 @@ bool ShouldPop()
 {
     if (IsPopped())
         return false;
-    if (m_iCurrentHealingTarget != -1)
+    if (CurrentHealingTargetIDX != -1)
     {
-        CachedEntity *target = ENTITY(m_iCurrentHealingTarget);
+        CachedEntity *target = ENTITY(CurrentHealingTargetIDX);
         if (CE_GOOD(target))
         {
-            if (ShouldChargePlayer(m_iCurrentHealingTarget))
+            if (ShouldChargePlayer(CurrentHealingTargetIDX))
                 return true;
         }
     }
@@ -412,86 +407,6 @@ bool IsVaccinator()
     return CE_INT(LOCAL_W, netvar.iItemDefinitionIndex) == 998;
 }
 
-void CreateMove()
-{
-    bool pop = false;
-    if (IsVaccinator() && auto_vacc)
-    {
-        DoResistSwitching();
-        int my_opt = OptimalResistance(LOCAL_E, &pop);
-        if (my_opt >= 0 && my_opt != CurrentResistance())
-        {
-            SetResistance(my_opt);
-        }
-        if (pop && CurrentResistance() == my_opt)
-        {
-            current_user_cmd->buttons |= IN_ATTACK2;
-        }
-    }
-    if (!force_healing_target && !enable)
-        return;
-    if (GetWeaponMode() != weapon_medigun)
-        return;
-    if (force_healing_target)
-    {
-        CachedEntity *target = ENTITY(force_healing_target);
-        if (CE_GOOD(target))
-        {
-            Vector out;
-            GetHitbox(target, 7, out);
-            AimAt(g_pLocalPlayer->v_Eye, out, current_user_cmd);
-            current_user_cmd->buttons |= IN_ATTACK;
-        }
-    }
-    if (!enable)
-        return;
-    UpdateData();
-    int old_target          = m_iCurrentHealingTarget;
-    m_iCurrentHealingTarget = BestTarget();
-    if (m_iNewTarget > 0 && m_iNewTarget < 10)
-        m_iNewTarget++;
-    else
-        m_iNewTarget = 0;
-    bool new_target = (old_target != m_iCurrentHealingTarget);
-    if (new_target)
-    {
-        m_iNewTarget = 1;
-    }
-    if (m_iCurrentHealingTarget == -1)
-        return;
-    CachedEntity *target = ENTITY(m_iCurrentHealingTarget);
-    Vector out;
-    GetHitbox(target, 7, out);
-
-    AimAt(g_pLocalPlayer->v_Eye, out, current_user_cmd);
-    if (silent)
-        g_pLocalPlayer->bUseSilentAngles = true;
-    if (!m_iNewTarget && (g_GlobalVars->tickcount % 300))
-        current_user_cmd->buttons |= IN_ATTACK;
-    /*if (m_iNewTarget || !(g_GlobalVars->tickcount % 300)) {
-        if (silent) g_pLocalPlayer->bUseSilentAngles = true;
-        AimAt(g_pLocalPlayer->v_Eye, out, current_user_cmd);
-        current_user_cmd->buttons |= IN_ATTACK;
-    }*/
-    if (IsVaccinator() && CE_GOOD(target) && auto_vacc)
-    {
-        int opt = OptimalResistance(target, &pop);
-        if (!pop && opt != -1)
-            SetResistance(opt);
-        if (pop && CurrentResistance() == opt)
-        {
-            current_user_cmd->buttons |= IN_ATTACK2;
-        }
-    }
-    else
-    {
-        if (pop_uber_auto && ShouldPop())
-            current_user_cmd->buttons |= IN_ATTACK2;
-    }
-}
-
-std::array<Timer, 32> reset_cd{};
-std::vector<patient_data_s> data(32);
 void UpdateData()
 {
     for (int i = 1; i < 32; i++)
@@ -499,7 +414,7 @@ void UpdateData()
         if (reset_cd[i].test_and_set(10000))
             data[i] = {};
         CachedEntity *ent = ENTITY(i);
-        if (CE_GOOD(ent))
+        if (CE_GOOD(ent) && ent->m_bAlivePlayer())
         {
             int health = ent->m_iHealth();
             if (data[i].last_damage > g_GlobalVars->curtime)
@@ -512,7 +427,7 @@ void UpdateData()
                 data[i].accum_damage_start = 0.0f;
             }
             const int last_health = data[i].last_health;
-            if (health != last_health)
+            if (health != last_health && health <= g_pPlayerResource->GetMaxHealth(ent))
             {
                 reset_cd[i].update();
                 data[i].last_health = health;
@@ -528,20 +443,29 @@ void UpdateData()
     }
 }
 
-int BestTarget()
+bool CanHeal(int idx)
 {
-    int best       = -1;
-    int best_score = -65536;
-    for (int i = 0; i < 32 && i < HIGHEST_ENTITY; i++)
-    {
-        int score = HealingPriority(i);
-        if (score > best_score && score != -1)
-        {
-            best       = i;
-            best_score = score;
-        }
-    }
-    return best;
+    CachedEntity *ent = ENTITY(idx);
+    if (!ent)
+        return false;
+    if (CE_BAD(ent))
+        return false;
+    if (ent->m_Type() != ENTITY_PLAYER)
+        return false;
+    if (g_IEngine->GetLocalPlayer() == idx)
+        return false;
+    if (!ent->m_bAlivePlayer())
+        return false;
+    if (ent->m_bEnemy())
+        return false;
+    if (ent->m_flDistance() > 420)
+        return false;
+    // TODO visible any hitbox
+    if (!IsEntityVisible(ent, 7))
+        return false;
+    if (IsPlayerInvisible(ent))
+        return false;
+    return true;
 }
 
 int HealingPriority(int idx)
@@ -580,8 +504,7 @@ int HealingPriority(int idx)
 #if ENABLE_IPC
     if (ipc::peer)
     {
-        if (hacks::shared::followbot::isEnabled() &&
-            hacks::shared::followbot::getTarget() == idx)
+        if (hacks::shared::followbot::isEnabled() && hacks::shared::followbot::follow_target == idx)
         {
             priority *= 6.0f;
         }
@@ -595,28 +518,171 @@ int HealingPriority(int idx)
     return priority;
 }
 
-bool CanHeal(int idx)
+int BestTarget()
 {
-    CachedEntity *ent = ENTITY(idx);
-    if (!ent)
-        return false;
-    if (CE_BAD(ent))
-        return false;
-    if (ent->m_Type() != ENTITY_PLAYER)
-        return false;
-    if (g_IEngine->GetLocalPlayer() == idx)
-        return false;
-    if (!ent->m_bAlivePlayer())
-        return false;
-    if (ent->m_bEnemy())
-        return false;
-    if (ent->m_flDistance() > 420)
-        return false;
-    // TODO visible any hitbox
-    if (!IsEntityVisible(ent, 7))
-        return false;
-    if (IsPlayerInvisible(ent))
-        return false;
-    return true;
+    int best       = 0;
+    int best_score = INT_MIN;
+    if (steamid_only)
+        return best;
+    for (int i = 0; i <= g_IEngine->GetMaxClients(); i++)
+    {
+        int score = HealingPriority(i);
+        if (score > best_score && score != -1)
+        {
+            best       = i;
+            best_score = score;
+        }
+    }
+    return best;
 }
+
+void CreateMove()
+{
+    if (CE_BAD(LOCAL_W))
+        return;
+
+    bool pop = false;
+    if (IsVaccinator() && auto_vacc)
+    {
+        DoResistSwitching();
+        int my_opt = OptimalResistance(LOCAL_E, &pop);
+        if (my_opt >= 0 && my_opt != CurrentResistance())
+        {
+            SetResistance(my_opt);
+        }
+        if (pop && CurrentResistance() == my_opt)
+        {
+            current_user_cmd->buttons |= IN_ATTACK2;
+        }
+    }
+    if (!steamid && !enable)
+        return;
+    if (GetWeaponMode() != weapon_medigun)
+        return;
+    /*if (force_healing_target)
+    {
+        CachedEntity *target = ENTITY(force_healing_target);
+        if (CE_GOOD(target))
+        {
+            if (target->player_info.friendsID != steamid || !CanHeal(force_healing_target))
+                force_healing_target = 0;
+            else
+            {
+
+            }
+        }
+        else
+            force_healing_target = 0;
+    }
+    else if (steamid)
+    {
+        for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
+        {
+            CachedEntity *ent = ENTITY(i);
+            if (CE_BAD(ent) || !ent->player_info.friendsID)
+                continue;
+            if (ent->player_info.friendsID == steamid && CanHeal(i))
+            {
+                force_healing_target = steamid;
+                break;
+            }
+        }
+    }*/
+    bool healing_steamid = false;
+    if (steamid)
+    {
+        unsigned int current_id = 0;
+        if (CurrentHealingTargetIDX)
+        {
+            CachedEntity *current_ent = ENTITY(CurrentHealingTargetIDX);
+            if (CE_GOOD(current_ent))
+                current_id = current_ent->player_info.friendsID;
+        }
+        if (current_id != steamid)
+        {
+            for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
+            {
+                CachedEntity *ent = ENTITY(i);
+                if (CE_BAD(ent) || !ent->player_info.friendsID)
+                    continue;
+                if (ent->player_info.friendsID == steamid && CanHeal(i))
+                {
+                    CurrentHealingTargetIDX = i;
+                    healing_steamid         = true;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            healing_steamid = true;
+        }
+    }
+
+    if (CurrentHealingTargetIDX && (CE_BAD(ENTITY(CurrentHealingTargetIDX)) || !CanHeal(CurrentHealingTargetIDX)))
+        CurrentHealingTargetIDX = 0;
+
+    if (enable)
+    {
+        // if no target or after 2 seconds, pick new target
+        if (!CurrentHealingTargetIDX || ((g_GlobalVars->tickcount % 132) == 0 && !healing_steamid))
+        {
+            CurrentHealingTargetIDX = BestTarget();
+        }
+    }
+
+    UpdateData();
+
+    if (!CurrentHealingTargetIDX)
+        return;
+
+    CachedEntity *target = ENTITY(CurrentHealingTargetIDX);
+
+    if (HandleToIDX(CE_INT(LOCAL_W, netvar.m_hHealingTarget)) != CurrentHealingTargetIDX)
+    {
+        auto out = target->hitboxes.GetHitbox(spine_2);
+        if (out)
+        {
+            if (silent)
+                g_pLocalPlayer->bUseSilentAngles = true;
+            AimAt(g_pLocalPlayer->v_Eye, out->center, current_user_cmd);
+            if ((g_GlobalVars->tickcount % 2) == 0)
+                current_user_cmd->buttons |= IN_ATTACK;
+        }
+    }
+
+    if (IsVaccinator() && CE_GOOD(target) && auto_vacc)
+    {
+        int opt = OptimalResistance(target, &pop);
+        if (!pop && opt != -1)
+            SetResistance(opt);
+        if (pop && CurrentResistance() == opt)
+        {
+            current_user_cmd->buttons |= IN_ATTACK2;
+        }
+    }
+    else
+    {
+        if (pop_uber_auto && ShouldPop())
+            current_user_cmd->buttons |= IN_ATTACK2;
+    }
+}
+
+void rvarCallback(settings::VariableBase<int> &var, int after)
+{
+    if (!after)
+    {
+        steamid = 0;
+        return;
+    }
+    steamid = after;
+}
+
+// void LevelInit(){}
+
+static InitRoutine Init([]() {
+    steam_var.installChangeCallback(rvarCallback);
+    EC::Register(EC::CreateMove, CreateMove, "autoheal", EC::average);
+    // EC::Register(EC::LevelInit, LevelInit, "autoheal_lvlinit", EC::average);
+});
 } // namespace hacks::tf::autoheal
